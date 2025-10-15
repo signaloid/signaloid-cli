@@ -1,0 +1,42 @@
+export interface DemoApplicationCard {
+    title: string;
+    description: string;
+    repoUrl: string;
+    coreId: string;
+}
+
+export interface DemoApplicationRepository {
+    RemoteURL: string;
+    Commit: string;
+    Branch: string;
+    BuildDirectory: string;
+    Arguments: string;
+    Core?: string;
+}
+
+const repoUrl = '<%= repoUrl %>';
+
+export const demoDetails: DemoApplicationCard = {
+    title: '<%= title %>',
+    description: '<%= description %>',
+    repoUrl: repoUrl,
+    coreId: '<%= coreId %>',
+}
+
+export const demoRepository: DemoApplicationRepository = {
+    RemoteURL: repoUrl,
+    Commit: '<%= commit %>',
+    Branch: '<%= branch %>',
+    BuildDirectory: '<%= buildDirectory %>',
+    Arguments: '<%= defaultArguments %>',
+    Core: '<%= coreId %>',
+}
+
+export enum DemoStates {
+    FIRST_TIME_RUN,
+    IDLE,
+    SECOND_TIME_LOADING,
+    BUILDING_REPO,
+    ERROR,
+}
+
