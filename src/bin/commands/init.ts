@@ -10,12 +10,27 @@ import { updateApiKeyInEnvFile } from "../utils/update-api-key-to-env-files";
 import { checkGithubAuth } from "../utils/github-auth";
 import { config } from "../../config/env.config";
 
+/**
+ * Registers the 'init' command and subcommands for initializing Signaloid projects.
+ *
+ * This command provides scaffolding functionality to create new Signaloid applications
+ * with the necessary project structure and configuration files.
+ *
+ * @param program - The Commander program instance to register commands with
+ *
+ * @example
+ * ```
+ * signaloid-cli init web-app
+ * ```
+ */
 export default function (program: Command) {
 	const initDemo = program.command("init").description("Initialize project");
 	initDemo
 		.command("web-app")
 		.description("Creates application structure ")
-		.action(async () => {
+		.option("--json-output <path>", "Output configuration to a JSON file")
+		.option("--json-input <path>", "Read configuration from a JSON file")
+		.action(async (options: { jsonOutput?: string; jsonInput?: string }) => {
 			const hasAuth = await checkGithubAuth();
 			if (!hasAuth) {
 				console.log(chalk.red("Aborting project initialization due to failed GitHub authentication."));
@@ -65,7 +80,7 @@ export default function (program: Command) {
 					},
 				},
 			]);
-			await createDemo(name, outputDir);
+			await createDemo(name, outputDir, options.jsonOutput, options.jsonInput);
 
 			const projectPath = path.join(outputDir, name);
 			const envFiles = [

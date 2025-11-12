@@ -6,4 +6,6 @@ module.exports = {
 	arrowParens: "always",
 	singleAttributePerLine: true,
 	ignore: ["**/templates/**"],
+	semi: true,
+	singleQuote: false
 };
