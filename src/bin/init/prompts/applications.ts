@@ -9,7 +9,7 @@ export async function promptForApplicationDetails(): Promise<DemoApplicationDeta
 			type: "input",
 			name: "description",
 			message: "Enter a short description for your application:",
-			default: "A new application created with the Signaloid CLI tool.",
+			default: "A new application created with Signaloid CLI.",
 		},
 		{
 			type: "input",

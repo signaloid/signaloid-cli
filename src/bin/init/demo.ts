@@ -156,10 +156,46 @@ async function buildDesignSystem(projectDir: string) {
 	spinner.succeed("Design system built successfully.");
 }
 
-export async function createDemo(projectNameFromArg: string | undefined, outputDir: string) {
-	// --- Run Interactive Wizard to get repo details ---
-	console.log("First, let's get some details about the application");
-	const appDetails = await promptForApplicationDetails();
+export async function createDemo(
+	projectNameFromArg: string | undefined,
+	outputDir: string,
+	jsonOutputPath?: string,
+	jsonInputPath?: string,
+) {
+	let appDetails;
+	let inputs;
+
+	// --- Notify user if JSON output is requested ---
+	if (jsonOutputPath) {
+		const resolvedPath = path.resolve(jsonOutputPath);
+		console.log(chalk.blue(`\nConfiguration will be saved to: ${chalk.cyan(resolvedPath)}\n`));
+	}
+
+	// --- Check if JSON input file is provided ---
+	if (jsonInputPath) {
+		const jsonSpinner = ora("Reading configuration from JSON file...").start();
+		try {
+			const resolvedJsonPath = path.resolve(jsonInputPath);
+			const jsonContent = await fs.readFile(resolvedJsonPath, "utf-8");
+			const configData = JSON.parse(jsonContent);
+
+			if (!configData.applicationDetails || !configData.inputs) {
+				throw new Error("Invalid JSON format. Expected 'applicationDetails' and 'inputs' properties.");
+			}
+
+			appDetails = configData.applicationDetails;
+			inputs = configData.inputs;
+			jsonSpinner.succeed(`Configuration loaded from ${resolvedJsonPath}`);
+		} catch (error: any) {
+			jsonSpinner.fail("Failed to read JSON configuration file.");
+			console.error(chalk.red(error.message));
+			return;
+		}
+	} else {
+		// --- Run Interactive Wizard to get repo details ---
+		console.log("First, let's get some details about the application");
+		appDetails = await promptForApplicationDetails();
+	}
 
 	const projectName = projectNameFromArg || appDetails.title;
 	const targetDir = outputDir ? path.resolve(outputDir) : process.cwd();
@@ -202,8 +238,28 @@ export async function createDemo(projectNameFromArg: string | undefined, outputD
 	}
 
 	// --- Continue with the rest of the wizard ---
-	console.log("\nNow, let's configure the inputs for your application.");
-	const inputs = await promptForInputs();
+	if (!jsonInputPath) {
+		console.log("\nNow, let's configure the inputs for your application.");
+		inputs = await promptForInputs();
+	}
+
+	// --- Write JSON Output if requested ---
+	if (jsonOutputPath) {
+		const jsonSpinner = ora("Writing configuration to JSON file...").start();
+		try {
+			const configData = {
+				applicationDetails: appDetails,
+				inputs: inputs,
+			};
+			const resolvedJsonPath = path.resolve(jsonOutputPath);
+			await fs.writeFile(resolvedJsonPath, JSON.stringify(configData, null, 2));
+			jsonSpinner.succeed(`Configuration written to ${resolvedJsonPath}`);
+			console.log(chalk.green(`\nConfiguration successfully saved to: ${chalk.cyan(resolvedJsonPath)}\n`));
+		} catch (error) {
+			jsonSpinner.fail("Failed to write JSON configuration file.");
+			console.error(error);
+		}
+	}
 
 	// --- Generate Files ---
 	const fileGenSpinner = ora("Generating configuration files...").start();
