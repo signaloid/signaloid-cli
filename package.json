@@ -1,6 +1,6 @@
 {
   "name": "@signaloid/signaloid-cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "",
   "main": "dist/bin/cli.js",
   "files": [
@@ -26,7 +26,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@signaloid/scce-sdk": "1.1.0",
+    "@signaloid/scce-sdk": "1.2.0",
     "commander": "13.1.0",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",

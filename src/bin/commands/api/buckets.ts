@@ -9,6 +9,7 @@ import {
 	showAvailableColumns,
 	fetchWithPagination,
 } from "../../utils/output";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'buckets' command and subcommands for managing cloud storage buckets.
@@ -75,8 +76,7 @@ export default function buckets(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to fetch buckets");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -115,8 +115,7 @@ export default function buckets(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create bucket");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -148,8 +147,7 @@ export default function buckets(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update bucket");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -166,8 +164,7 @@ export default function buckets(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete bucket");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

@@ -15,6 +15,7 @@ import {
 	showAvailableColumns,
 	fetchWithPagination,
 } from "../../utils/output";
+import { handleCliError } from "../../utils/error-handler";
 
 const TERMINAL_BUILD_STATES = new Set(["completed", "cancelled", "stopped"]);
 
@@ -103,8 +104,7 @@ export default function builds(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list builds");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -139,8 +139,7 @@ export default function builds(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Build creation failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -169,8 +168,7 @@ export default function builds(program: Command) {
 				);
 			} catch (e: any) {
 				spinner.fail("Failed to get status");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -187,8 +185,7 @@ export default function builds(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get output URLs");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -220,8 +217,7 @@ export default function builds(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to get output for the build");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -243,8 +239,7 @@ export default function builds(program: Command) {
 				process.exit(TERMINAL_BUILD_STATES.has(final) && final === "completed" ? 0 : 1);
 			} catch (e: any) {
 				spinner.fail("Failed while waiting for build");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -269,8 +264,7 @@ export default function builds(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to get build");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -303,8 +297,7 @@ export default function builds(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Repo build failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -322,8 +315,7 @@ export default function builds(program: Command) {
 				console.log(JSON.stringify({ BuildID: buildId, cancelled: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to cancel build");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -341,8 +333,7 @@ export default function builds(program: Command) {
 				console.log(JSON.stringify({ BuildID: buildId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete build");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

@@ -3,6 +3,7 @@ import ora from "ora";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
+import { handleCliError } from "../../utils/error-handler";
 
 function parseEvents(maybeCsv?: string): string[] | undefined {
 	if (!maybeCsv) return undefined;
@@ -69,8 +70,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to list webhooks");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -87,8 +87,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -127,8 +126,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(details, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -169,8 +167,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -187,8 +184,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify({ webhookId: id, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -203,8 +199,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get stats");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -221,8 +216,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to enable webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -239,8 +233,7 @@ export default function webhooks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disable webhook");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

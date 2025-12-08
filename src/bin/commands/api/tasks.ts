@@ -14,6 +14,7 @@ import {
 } from "../../utils/output";
 import { loadJsonIfPath, parseKeyVals } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
+import { handleCliError } from "../../utils/error-handler";
 
 const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
 
@@ -93,8 +94,7 @@ export default function tasks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Task creation failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -148,8 +148,7 @@ export default function tasks(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list tasks");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -174,8 +173,7 @@ export default function tasks(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to get task");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -193,8 +191,7 @@ export default function tasks(program: Command) {
 				console.log(JSON.stringify({ TaskID: taskId, Status: res }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get status");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -212,8 +209,7 @@ export default function tasks(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get output URLs");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -249,8 +245,7 @@ export default function tasks(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to download output");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -268,8 +263,7 @@ export default function tasks(program: Command) {
 				console.log(JSON.stringify({ TaskID: taskId, cancelled: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to cancel task");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -287,8 +281,7 @@ export default function tasks(program: Command) {
 				console.log(JSON.stringify({ TaskID: taskId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete task");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -310,8 +303,7 @@ export default function tasks(program: Command) {
 				process.exit(TERMINAL_TASK_STATES.has(final) && final === "completed" ? 0 : 1);
 			} catch (e: any) {
 				spinner.fail("Failed to watch task");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }
