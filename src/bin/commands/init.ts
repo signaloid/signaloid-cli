@@ -83,9 +83,7 @@ export default function (program: Command) {
 			await createDemo(name, outputDir, options.jsonOutput, options.jsonInput);
 
 			const projectPath = path.join(outputDir, name);
-			const envFiles = [
-				path.join(projectPath, "src", "environments", "environment.ts"),
-			];
+			const envFiles = [path.join(projectPath, "src", "environments", "environment.ts")];
 
 			const apiKeyProperty = `\nSIGNALOID_API_KEY: '${apiKey}'`;
 

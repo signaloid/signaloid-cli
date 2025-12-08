@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { loadConfig, saveConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { validateEmail, validateNonEmptyString } from "../../utils/validation";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'auth' command and subcommands for authentication management.
@@ -32,45 +33,114 @@ export default function auth(program: Command) {
 
 	cmd.command("login")
 		.description("Login via API key or email/password")
-		.option("--api-key <key>", "Signaloid API key")
-		.option("--email <email>", "Email for password login")
+		// Optional values so you can do: --api-key or --api-key <key>
+		.option("--api-key [key]", "Signaloid API key")
+		.option("--email [email]", "Email for password login")
 		.option("--password <password>", "Password for password login")
 		.action(async (opts) => {
 			const cfg = await loadConfig();
-			const spinner = ora("Authenticating...").start();
+			const spinner = ora(); // start later, after prompts
+
 			try {
-				if (!opts.apiKey && (!opts.email || !opts.password)) {
-					spinner.fail("Either --api-key or both --email and --password are required");
-					process.exit(1);
+				let apiKeyOpt = opts.apiKey as string | boolean | undefined;
+				let emailOpt = opts.email as string | boolean | undefined;
+				let password = opts.password as string | undefined;
+
+				//
+				// 0. If no options at all → ask user which method to use
+				//
+				if (apiKeyOpt === undefined && emailOpt === undefined && password === undefined) {
+					const choice = await inquirer.prompt<{ method: "apikey" | "email" }>([
+						{
+							type: "list",
+							name: "method",
+							message: "How would you like to authenticate?",
+							choices: [
+								{ name: "API key", value: "apikey" },
+								{ name: "Email & password", value: "email" },
+							],
+						},
+					]);
+
+					if (choice.method === "apikey") {
+						apiKeyOpt = true; // triggers API key flow, will prompt for value
+					} else {
+						emailOpt = true; // triggers email/password flow, will prompt for email + password
+					}
 				}
-				if (opts.apiKey) {
-					// Validate API key is not empty
-					if (!validateNonEmptyString(opts.apiKey)) {
+
+				//
+				// 1. API KEY LOGIN FLOW
+				//
+				if (apiKeyOpt !== undefined) {
+					console.log("API key mode selected");
+
+					let apiKey: string | undefined;
+
+					if (typeof apiKeyOpt === "string" && validateNonEmptyString(apiKeyOpt)) {
+						// --api-key <key>
+						apiKey = apiKeyOpt;
+					} else {
+						// --api-key (no value) OR chosen from menu -> prompt for it, masked
+						const answers = await inquirer.prompt<{ apiKey: string }>([
+							{
+								type: "password",
+								name: "apiKey",
+								message: "API key:",
+								mask: "*",
+								validate: (input: string) => {
+									if (!validateNonEmptyString(input)) {
+										return "API key cannot be empty";
+									}
+									return true;
+								},
+							},
+						]);
+
+						apiKey = answers.apiKey;
+					}
+
+					// Final validation just in case
+					if (!validateNonEmptyString(apiKey!)) {
 						spinner.fail("API key cannot be empty");
 						process.exit(1);
 					}
 
-					cfg.auth = { mode: "apikey", apiKey: opts.apiKey };
+					spinner.start("Authenticating...");
+
+					cfg.auth = { mode: "apikey", apiKey: apiKey! };
 					await saveConfig(cfg);
 					const client = makeClient(cfg);
-					const me = await client.users.me();
+					await client.users.me(); // verify key
+
 					spinner.succeed("API key authenticated");
-					if (me.name || me.email || me.id) {
-						console.log(`Hello, ${me.name || me.email || me.id}`);
-					} else {
-						console.log("Hello!");
-					}
+					console.log("Hello!");
+
+					console.log(
+						chalk.cyan(
+							"Tip: API keys are the recommended way to authenticate the CLI because they are long-lived and easy to rotate.",
+						),
+					);
 					return;
 				}
 
-				let { email, password } = opts;
+				//
+				// 2. EMAIL/PASSWORD LOGIN FLOW
+				//
+				console.log("Email/password mode selected");
+
+				let email: string | undefined = typeof emailOpt === "string" ? emailOpt : undefined;
+
 				if (!email || !password) {
-					const a = await inquirer.prompt([
+					const answers = await inquirer.prompt<{
+						email?: string;
+						password?: string;
+					}>([
 						{
 							type: "input",
 							name: "email",
 							message: "Email:",
-							when: !email,
+							when: () => !email, // only ask if missing
 							validate: (input: string) => {
 								if (!validateNonEmptyString(input)) {
 									return "Email cannot be empty";
@@ -85,8 +155,8 @@ export default function auth(program: Command) {
 							type: "password",
 							name: "password",
 							message: "Password:",
-							when: !password,
 							mask: "*",
+							when: () => !password, // only ask if missing
 							validate: (input: string) => {
 								if (!validateNonEmptyString(input)) {
 									return "Password cannot be empty";
@@ -95,27 +165,86 @@ export default function auth(program: Command) {
 							},
 						},
 					]);
-					email = email || a.email;
-					password = password || a.password;
+
+					email = email || answers.email;
+					password = password || answers.password;
 				}
 
-				// Validate email and password from command-line options
-				if (email && !validateEmail(email)) {
+				// Final validation after prompts
+				if (!email) {
+					spinner.fail("Email is required");
+					process.exit(1);
+				}
+				if (!password) {
+					spinner.fail("Password is required");
+					process.exit(1);
+				}
+
+				if (!validateEmail(email)) {
 					spinner.fail("Invalid email address");
 					process.exit(1);
 				}
-				if (password && !validateNonEmptyString(password)) {
+				if (!validateNonEmptyString(password)) {
 					spinner.fail("Password cannot be empty");
 					process.exit(1);
 				}
 
-				const client = makeClient(cfg);
-				await client.auth.login(email!, password!);
-				cfg.auth = { mode: "email", email };
+				const loginCfg = {
+					...cfg,
+					auth: { mode: "email" as const },
+				};
+
+				const client = makeClient(loginCfg);
+
+				spinner.start("Authenticating...");
+				await client.auth.login(email, password);
+
+				const authHeader = await client.auth.getAuthorizationHeader();
+
+				const token = authHeader.replace(/^Bearer\s+/i, "");
+				cfg.auth = { mode: "jwt", token };
+
 				await saveConfig(cfg);
-				const me = await client.users.me();
+
+				let hasApiKeys = false;
+				try {
+					const keys = await client.keys.list();
+					hasApiKeys = (keys.Count ?? keys.Keys?.length ?? 0) > 0;
+				} catch {
+					// if this fails, skip the suggestion; don't break login
+				}
+
 				spinner.succeed("Signed in");
-				console.log(`Hello, ${me.name || me.email || me.id}`);
+				console.log("Hello!");
+
+				if (!hasApiKeys) {
+					console.log(
+						chalk.yellow(
+							[
+								"",
+								"Tip: You don't have any API keys yet.",
+								"For long-lived CLI authentication, we recommend to create one:",
+								"",
+								'  signaloid-cli keys create --name "my-cli-key"',
+								"  signaloid-cli auth login --api-key <created-key>",
+								"",
+							].join("\n"),
+						),
+					);
+				} else {
+					console.log(
+						chalk.cyan(
+							[
+								"",
+								"Tip: For long-lived CLI usage, we recommend to use an API key instead of email/password.",
+								"You can log in with one of your existing keys using:",
+								"",
+								"  signaloid-cli auth login --api-key <your-key>",
+								"",
+							].join("\n"),
+						),
+					);
+				}
 			} catch (e: any) {
 				spinner.fail("Authentication failed");
 				console.log(chalk.red(e?.message || String(e)));
@@ -134,8 +263,7 @@ export default function auth(program: Command) {
 				console.log(JSON.stringify(me, null, 2));
 			} catch (e: any) {
 				spinner.fail("Not authenticated");
-				console.log(chalk.red(e?.message || String(e)));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 

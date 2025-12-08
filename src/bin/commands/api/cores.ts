@@ -10,6 +10,7 @@ import {
 	parseColumns,
 	showAvailableColumns,
 } from "../../utils/output";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'cores' command and subcommands for managing Signaloid computation cores.
@@ -76,8 +77,7 @@ export default function cores(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -102,8 +102,7 @@ export default function cores(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -143,8 +142,8 @@ export default function cores(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.details || e?.message || String(e));
-				process.exit(1);
+				e.message = e.details;
+				await handleCliError(e);
 			}
 		});
 
@@ -189,8 +188,7 @@ export default function cores(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -208,8 +206,7 @@ export default function cores(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

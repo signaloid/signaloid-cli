@@ -14,6 +14,7 @@ import {
 	fetchWithPagination,
 } from "../../utils/output";
 import { FileItem } from "@signaloid/scce-sdk";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'files' command and subcommands for managing files in cloud storage.
@@ -90,8 +91,7 @@ export default function files(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list files");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -109,8 +109,7 @@ export default function files(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to stat file");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -162,8 +161,7 @@ export default function files(program: Command) {
 				console.log(JSON.stringify([savedPath], null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to download file");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -194,8 +192,7 @@ export default function files(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to upload");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -212,8 +209,7 @@ export default function files(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create directory");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -240,8 +236,7 @@ export default function files(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

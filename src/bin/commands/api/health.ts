@@ -2,6 +2,7 @@ import { Command } from "commander";
 import ora from "ora";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'health' command for checking Signaloid API health status.
@@ -29,8 +30,7 @@ export default function health(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Unhealthy");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

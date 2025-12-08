@@ -27,7 +27,7 @@ const program = new Command();
 program
 	.name("signaloid-cli")
 	.description("Signaloid CLI — generators + API actions")
-	.version("1.0.0")
+	.version("1.1.0")
 	.option("-d, --debug", "Output extra debugging")
 	.option("--json", "Machine-readable JSON output")
 	.option("--quiet", "Suppress spinners and nonessential output")

@@ -11,6 +11,7 @@ import {
 	showAvailableColumns,
 	fetchWithPagination,
 } from "../../utils/output";
+import { handleCliError } from "../../utils/error-handler";
 
 type DataSource = {
 	Object?: "DataSource";
@@ -142,8 +143,7 @@ export default function drives(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -160,8 +160,7 @@ export default function drives(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -197,8 +196,7 @@ export default function drives(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -233,8 +231,7 @@ export default function drives(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -251,8 +248,7 @@ export default function drives(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

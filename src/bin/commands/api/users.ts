@@ -3,6 +3,7 @@ import ora from "ora";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
+import { handleCliError } from "../../utils/error-handler";
 
 function toEpochMs(iso?: string): number | undefined {
 	if (!iso) return undefined;
@@ -51,8 +52,7 @@ export default function users(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to fetch user");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -87,8 +87,7 @@ export default function users(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update user");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -118,8 +117,7 @@ export default function users(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to fetch logs");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -136,8 +134,7 @@ export default function users(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to logout-all");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

@@ -12,6 +12,7 @@ import {
 	showAvailableColumns,
 	fetchWithPagination,
 } from "../../utils/output";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'repos' command and subcommands for managing code repositories.
@@ -88,8 +89,7 @@ export default function repos(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list repositories");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -114,8 +114,7 @@ export default function repos(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to get repository");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -163,8 +162,7 @@ export default function repos(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create repository");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -195,8 +193,7 @@ export default function repos(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update repository");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -214,8 +211,7 @@ export default function repos(program: Command) {
 				console.log(JSON.stringify({ RepositoryID: repoId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disconnect repository");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -244,8 +240,7 @@ export default function repos(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to list repository builds");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

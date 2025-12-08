@@ -2,6 +2,7 @@ import { Command } from "commander";
 import ora from "ora";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
+import { handleCliError } from "../../utils/error-handler";
 
 async function resolveUserId(explicitUserId?: string) {
 	if (explicitUserId) return explicitUserId;
@@ -46,8 +47,7 @@ export default function github(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to fetch integration");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -69,8 +69,7 @@ export default function github(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to connect/update GitHub");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -87,8 +86,7 @@ export default function github(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disconnect GitHub");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -107,8 +105,7 @@ export default function github(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Proxy request failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -142,8 +139,7 @@ export default function github(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to list branches");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

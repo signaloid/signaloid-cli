@@ -6,6 +6,7 @@ import { webReadableToBuffer, writeBinary } from "../../utils/fsx";
 import { loadJsonIfPath } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
 import { PlotResponse } from "@signaloid/scce-sdk";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'plot' command and subcommands for generating plots and visualizations.
@@ -75,8 +76,7 @@ export default function plot(program: Command) {
 				spinner.succeed(`Saved: ${fullPath}`);
 			} catch (e: any) {
 				spinner.fail("Plot failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -131,8 +131,7 @@ export default function plot(program: Command) {
 				spinner.succeed(`Saved: ${fullPath}`);
 			} catch (e: any) {
 				spinner.fail("Plot value failed");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }

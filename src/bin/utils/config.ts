@@ -7,7 +7,7 @@ export type CLIConfig = {
 	env?: "production";
 	apiEndpoint?: string;
 	websocketEndpoint?: string;
-	auth?: { mode: "apikey" | "email"; apiKey?: string; email?: string };
+	auth?: { mode: "apikey" | "email" | "jwt"; apiKey?: string; email?: string; token?: string };
 };
 
 const baseDir =

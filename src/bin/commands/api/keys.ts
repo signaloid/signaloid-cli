@@ -12,6 +12,8 @@ import {
 import { makeClient } from "../../utils/sdk";
 import { validateApiKey } from "../../utils/validate-api-key";
 import { config } from "../../../config/env.config";
+import { parseDuration } from "../../utils/time";
+import { handleCliError } from "../../utils/error-handler";
 
 /**
  * Registers the 'keys' command and subcommands for managing API keys.
@@ -82,8 +84,7 @@ export default function keys(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list keys");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e, "Listing API keys");
 			}
 		});
 
@@ -92,18 +93,32 @@ export default function keys(program: Command) {
 		.description("Create a new API key")
 		.requiredOption("--name <name>", "Key name")
 		.option("--valid-until <iso>", "Expiration date (ISO 8601). Default: no expiry")
+		.option("--valid-for <duration>", "Duration before expiry (e.g. 7d, 24h, 30m)")
 		.action(async (opts) => {
 			const spinner = ora("Creating API key...").start();
 			try {
 				const client = makeClient(await loadConfig());
 
+				if (opts.validUntil && opts.validFor) {
+					throw new Error("Use either --valid-until or --valid-for, not both.");
+				}
+
 				let validUntil: number | null = null;
+
+				// --valid-until
 				if (opts.validUntil) {
 					const date = new Date(opts.validUntil);
 					if (isNaN(date.getTime())) {
 						throw new Error(`Invalid date format for --valid-until: ${opts.validUntil}`);
 					}
 					validUntil = date.getTime();
+				}
+
+				// --valid-for
+				if (opts.validFor) {
+					const now = Date.now();
+					const durationMs = parseDuration(opts.validFor);
+					validUntil = now + durationMs;
 				}
 
 				const payload = {
@@ -116,8 +131,7 @@ export default function keys(program: Command) {
 				console.log(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create key");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
@@ -161,8 +175,7 @@ export default function keys(program: Command) {
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to validate API key");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 }
