@@ -1,9 +1,12 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { OutputFormat } from "../../utils/output";
+import { printData } from "../../utils/verbosity";
 
 /**
  * Registers the 'samples' command and subcommands for retrieving statistical samples.
@@ -23,32 +26,40 @@ import { handleCliError } from "../../utils/error-handler";
  * ```
  */
 export default function samples(program: Command) {
-	const cmd = program.command("samples").description("Samples API");
+	const cmd = program.command("samples").description("Retrieve statistical samples from task outputs");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("from-value-id")
 		.description("Get samples from a Reference Core task using output Value IDs")
 		.requiredOption("--task-id <id>", "Task ID")
 		.requiredOption("--value-id <id>", "Value ID")
 		.option("--count <n>", "Number of samples", (v) => parseInt(v, 10))
+		.option("--continuation-token <token>", "Pagination continuation token")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
-			const spinner = ora("Fetching samples...").start();
+			const spinner = createSpinner("Fetching samples...");
 			try {
 				const client = makeClient(await loadConfig());
 
 				const taskId = opts.taskId;
 				const valueId = opts.valueId;
 
-				if (!taskId || !valueId) {
-					throw new Error("Both --task-id and --value-id are required");
-				}
-
 				const res = await client.samples.getSamples({
 					taskID: taskId,
 					valueID: valueId,
 					count: opts.count,
+					continuationToken: opts.continuationToken,
 				});
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					// For samples, JSON is the most appropriate format, but respect the flag
+					printData(JSON.stringify(res, null, 2));
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to fetch samples");
 				await handleCliError(e);
@@ -60,13 +71,13 @@ export default function samples(program: Command) {
 		.option("--ux-string <ux-string>", "Ux string")
 		.option("--file <json>", "JSON file with Ux string")
 		.option("--count <n>", "Number of samples", (v) => parseInt(v, 10))
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
-			const spinner = ora("Fetching samples from Ux string...").start();
-			if (!opts.uxString && !opts.file) {
-				spinner.fail("Either --ux-string or --file is required");
-				process.exit(1);
-			}
+			const spinner = createSpinner("Fetching samples from Ux string...");
 			try {
+				if (!opts.uxString && !opts.file) {
+					throw new Error("Either --ux-string or --file is required");
+				}
 				const client = makeClient(await loadConfig());
 				let res;
 				if (opts.file) {
@@ -77,7 +88,14 @@ export default function samples(program: Command) {
 					res = await client.samples.getSamplesFromUx(raw, opts.count);
 				}
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					// For samples, JSON is the most appropriate format, but respect the flag
+					printData(JSON.stringify(res, null, 2));
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to fetch samples from Ux string");
 				await handleCliError(e);

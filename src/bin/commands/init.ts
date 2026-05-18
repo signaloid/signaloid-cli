@@ -3,12 +3,13 @@ import { createDemo } from "../init/demo";
 import inquirer from "inquirer";
 import path from "path";
 import { promises as fs } from "fs";
-import ora from "ora";
+import { createSpinner } from "../utils/spinner";
 import { validateApiKey } from "../utils/validate-api-key";
 import chalk from "chalk";
 import { updateApiKeyInEnvFile } from "../utils/update-api-key-to-env-files";
 import { checkGithubAuth } from "../utils/github-auth";
 import { config } from "../../config/env.config";
+import { useGhStyleHelp, addLearnMore } from "../utils/help-formatter";
 
 /**
  * Registers the 'init' command and subcommands for initializing Signaloid projects.
@@ -24,7 +25,9 @@ import { config } from "../../config/env.config";
  * ```
  */
 export default function (program: Command) {
-	const initDemo = program.command("init").description("Initialize project");
+	const initDemo = program.command("init").description("Initialize a new Signaloid project");
+	useGhStyleHelp(initDemo);
+	addLearnMore(initDemo, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 	initDemo
 		.command("web-app")
 		.description("Creates application structure ")
@@ -49,7 +52,7 @@ export default function (program: Command) {
 					},
 				},
 			]);
-			const validateionSpinner = ora("Validating API key...").start();
+			const validateionSpinner = createSpinner("Validating API key...");
 			const isValid = await validateApiKey(apiKey);
 			if (!isValid) {
 				validateionSpinner.fail("Invalid API key.");
@@ -89,7 +92,7 @@ export default function (program: Command) {
 
 			try {
 				// Create a spinner for user feedback, similar to your other functions
-				const spinner = ora("Updating API key in environment files...").start();
+				const spinner = createSpinner("Updating API key in environment files...");
 
 				// Use Promise.all to update files concurrently
 				await Promise.all(envFiles.map((file) => updateApiKeyInEnvFile(file, apiKey)));

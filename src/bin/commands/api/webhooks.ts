@@ -1,9 +1,12 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { OutputFormat, displayResource, createCustomTable, parseColumns, showAvailableColumns } from "../../utils/output";
+import { printData } from "../../utils/verbosity";
 
 function parseEvents(maybeCsv?: string): string[] | undefined {
 	if (!maybeCsv) return undefined;
@@ -57,17 +60,34 @@ function resolveStatusFlag(opts: {
  * ```
  */
 export default function webhooks(program: Command) {
-	const cmd = program.command("webhooks").description("Manage webhooks");
+	const cmd = program.command("webhooks").description("Configure webhooks for event notifications");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("list")
-		.description("List webhooks")
-		.action(async () => {
-			const spinner = ora("Fetching webhooks...").start();
+		.description("List all configured webhooks")
+		.option("--format <type>", "Output format: table|json", "json")
+		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
+		.action(async (opts) => {
+			if (opts.columns === "help") {
+				showAvailableColumns("webhooks");
+				return;
+			}
+
+			const spinner = createSpinner("Fetching webhooks...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.list();
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					const selectedColumns = parseColumns(opts.columns);
+					const webhooks = (res as any).Webhooks || (res as any).webhooks || [];
+					printData(createCustomTable("webhooks", webhooks, selectedColumns));
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to list webhooks");
 				await handleCliError(e);
@@ -75,16 +95,23 @@ export default function webhooks(program: Command) {
 		});
 
 	cmd.command("get")
-		.description("Get a webhook")
+		.description("Get details of a specific webhook")
 		.requiredOption("--webhook-id <id>", "Webhook ID")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const id = String(opts.webhookId);
-			const spinner = ora("Fetching webhook...").start();
+			const spinner = createSpinner("Fetching webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.getOne(id);
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, "Webhook Details");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to get webhook");
 				await handleCliError(e);
@@ -93,14 +120,15 @@ export default function webhooks(program: Command) {
 
 	// Fixed: final object is always WebhookDetails
 	cmd.command("create")
-		.description("Create a webhook")
+		.description("Create a new webhook endpoint")
 		.requiredOption("--url <url>", "Target URL")
 		.option("--events <e1,e2,...>", "Comma-separated event list")
 		.option("--description <text>", "Optional description")
 		.option("--status <active|disabled>", "Set status after create")
 		.option("--payload-file <json>", "Optional JSON payload to merge (advanced)")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
-			const spinner = ora("Creating webhook...").start();
+			const spinner = createSpinner("Creating webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -123,7 +151,13 @@ export default function webhooks(program: Command) {
 					: await client.webhooks.getOne(created.webhookId);
 
 				spinner.succeed("Webhook created");
-				console.log(JSON.stringify(details, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(details, null, 2));
+				} else {
+					displayResource(details, "Created Webhook");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to create webhook");
 				await handleCliError(e);
@@ -131,7 +165,7 @@ export default function webhooks(program: Command) {
 		});
 
 	cmd.command("update")
-		.description("Update a webhook")
+		.description("Update an existing webhook's configuration")
 		.requiredOption("--webhook-id <id>", "Webhook ID")
 		.option("--url <url>", "New URL")
 		.option("--events <e1,e2,...>", "Comma-separated event list")
@@ -140,9 +174,10 @@ export default function webhooks(program: Command) {
 		.option("--active", "Shortcut for --status active")
 		.option("--disabled", "Shortcut for --status disabled")
 		.option("--payload-file <json>", "Optional JSON payload to merge (advanced)")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const id = String(opts.webhookId);
-			const spinner = ora("Updating webhook...").start();
+			const spinner = createSpinner("Updating webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -164,7 +199,13 @@ export default function webhooks(program: Command) {
 
 				const res = await client.webhooks.update(id, payload as any);
 				spinner.succeed("Webhook updated");
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, "Updated Webhook");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to update webhook");
 				await handleCliError(e);
@@ -176,12 +217,12 @@ export default function webhooks(program: Command) {
 		.requiredOption("--webhook-id <id>", "Webhook ID")
 		.action(async (opts) => {
 			const id = String(opts.webhookId);
-			const spinner = ora("Deleting webhook...").start();
+			const spinner = createSpinner("Deleting webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 				await client.webhooks.delete(id);
 				spinner.succeed("Webhook deleted");
-				console.log(JSON.stringify({ webhookId: id, deleted: true }, null, 2));
+				printData(JSON.stringify({ WebhookID: id, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete webhook");
 				await handleCliError(e);
@@ -189,14 +230,21 @@ export default function webhooks(program: Command) {
 		});
 
 	cmd.command("stats")
-		.description("Quick webhook stats")
-		.action(async () => {
-			const spinner = ora("Computing webhook stats...").start();
+		.description("View webhook statistics")
+		.option("--format <type>", "Output format: table|json", "json")
+		.action(async (opts) => {
+			const spinner = createSpinner("Computing webhook stats...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.getStats();
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, "Webhook Statistics");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to get stats");
 				await handleCliError(e);
@@ -204,16 +252,23 @@ export default function webhooks(program: Command) {
 		});
 
 	cmd.command("enable")
-		.description("Enable a webhook (status=active)")
+		.description("Enable a webhook (set status to active)")
 		.requiredOption("--webhook-id <id>", "Webhook ID")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const id = String(opts.webhookId);
-			const spinner = ora("Enabling webhook...").start();
+			const spinner = createSpinner("Enabling webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.enable(id);
 				spinner.succeed("Webhook enabled");
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, "Enabled Webhook");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to enable webhook");
 				await handleCliError(e);
@@ -221,16 +276,23 @@ export default function webhooks(program: Command) {
 		});
 
 	cmd.command("disable")
-		.description("Disable a webhook (status=disabled)")
+		.description("Disable a webhook (set status to disabled)")
 		.requiredOption("--webhook-id <id>", "Webhook ID")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const id = String(opts.webhookId);
-			const spinner = ora("Disabling webhook...").start();
+			const spinner = createSpinner("Disabling webhook...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.disable(id);
 				spinner.succeed("Webhook disabled");
-				console.log(JSON.stringify(res, null, 2));
+
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, "Disabled Webhook");
+				}
 			} catch (e: any) {
 				spinner.fail("Failed to disable webhook");
 				await handleCliError(e);

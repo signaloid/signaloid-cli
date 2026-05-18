@@ -1,11 +1,14 @@
 import { Command } from "commander";
 import inquirer from "inquirer";
-import ora from "ora";
+import { createSpinner, createLazySpinner } from "../../utils/spinner";
 import chalk from "chalk";
 import { loadConfig, saveConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { validateEmail, validateNonEmptyString } from "../../utils/validation";
 import { handleCliError } from "../../utils/error-handler";
+import { displayResource, OutputFormat } from "../../utils/output";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printError, printInfo, printTip, printData } from "../../utils/verbosity";
 
 /**
  * Registers the 'auth' command and subcommands for authentication management.
@@ -29,7 +32,9 @@ import { handleCliError } from "../../utils/error-handler";
  * ```
  */
 export default function auth(program: Command) {
-	const cmd = program.command("auth").description("Authenticate with Signaloid");
+	const cmd = program.command("auth").description("Authenticate with Signaloid Cloud Compute Engine");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("login")
 		.description("Login via API key or email/password")
@@ -39,7 +44,7 @@ export default function auth(program: Command) {
 		.option("--password <password>", "Password for password login")
 		.action(async (opts) => {
 			const cfg = await loadConfig();
-			const spinner = ora(); // start later, after prompts
+			const spinner = createLazySpinner(); // start later, after prompts
 
 			try {
 				let apiKeyOpt = opts.apiKey as string | boolean | undefined;
@@ -73,7 +78,7 @@ export default function auth(program: Command) {
 				// 1. API KEY LOGIN FLOW
 				//
 				if (apiKeyOpt !== undefined) {
-					console.log("API key mode selected");
+					printInfo("API key mode selected");
 
 					let apiKey: string | undefined;
 
@@ -103,7 +108,7 @@ export default function auth(program: Command) {
 					// Final validation just in case
 					if (!validateNonEmptyString(apiKey!)) {
 						spinner.fail("API key cannot be empty");
-						process.exit(1);
+						process.exit(2);
 					}
 
 					spinner.start("Authenticating...");
@@ -114,9 +119,9 @@ export default function auth(program: Command) {
 					await client.users.me(); // verify key
 
 					spinner.succeed("API key authenticated");
-					console.log("Hello!");
+					printInfo("Hello!");
 
-					console.log(
+					printTip(
 						chalk.cyan(
 							"Tip: API keys are the recommended way to authenticate the CLI because they are long-lived and easy to rotate.",
 						),
@@ -127,7 +132,7 @@ export default function auth(program: Command) {
 				//
 				// 2. EMAIL/PASSWORD LOGIN FLOW
 				//
-				console.log("Email/password mode selected");
+				printInfo("Email/password mode selected");
 
 				let email: string | undefined = typeof emailOpt === "string" ? emailOpt : undefined;
 
@@ -173,20 +178,20 @@ export default function auth(program: Command) {
 				// Final validation after prompts
 				if (!email) {
 					spinner.fail("Email is required");
-					process.exit(1);
+					process.exit(2);
 				}
 				if (!password) {
 					spinner.fail("Password is required");
-					process.exit(1);
+					process.exit(2);
 				}
 
 				if (!validateEmail(email)) {
 					spinner.fail("Invalid email address");
-					process.exit(1);
+					process.exit(2);
 				}
 				if (!validateNonEmptyString(password)) {
 					spinner.fail("Password cannot be empty");
-					process.exit(1);
+					process.exit(2);
 				}
 
 				const loginCfg = {
@@ -215,10 +220,10 @@ export default function auth(program: Command) {
 				}
 
 				spinner.succeed("Signed in");
-				console.log("Hello!");
+				printInfo("Hello!");
 
 				if (!hasApiKeys) {
-					console.log(
+					printTip(
 						chalk.yellow(
 							[
 								"",
@@ -232,7 +237,7 @@ export default function auth(program: Command) {
 						),
 					);
 				} else {
-					console.log(
+					printTip(
 						chalk.cyan(
 							[
 								"",
@@ -246,21 +251,32 @@ export default function auth(program: Command) {
 					);
 				}
 			} catch (e: any) {
+				if (e?.name === "ExitPromptError") {
+					spinner.stop();
+					printInfo("\nCancelled.");
+					return;
+				}
 				spinner.fail("Authentication failed");
-				console.log(chalk.red(e?.message || String(e)));
+				printError(chalk.red(e?.message || String(e)));
 				process.exit(1);
 			}
 		});
 
 	cmd.command("whoami")
 		.description("Show current identity")
-		.action(async () => {
-			const spinner = ora("Checking session...").start();
+		.option("--format <type>", "Output format: table|json", "json")
+		.action(async (opts) => {
+			const spinner = createSpinner("Checking session...");
 			try {
 				const client = makeClient(await loadConfig());
 				const me = await client.users.me();
 				spinner.succeed();
-				console.log(JSON.stringify(me, null, 2));
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(me, null, 2));
+				} else {
+					displayResource(me, "Current User");
+				}
 			} catch (e: any) {
 				spinner.fail("Not authenticated");
 				await handleCliError(e);
@@ -270,7 +286,7 @@ export default function auth(program: Command) {
 	cmd.command("logout")
 		.description("Clear local auth and sign out (if email)")
 		.action(async () => {
-			const spinner = ora("Logging out...").start();
+			const spinner = createSpinner("Logging out...");
 			try {
 				const cfg = await loadConfig();
 				if (cfg.auth?.mode === "email") {
@@ -282,7 +298,7 @@ export default function auth(program: Command) {
 				spinner.succeed("Logged out locally");
 			} catch (e: any) {
 				spinner.fail("Logout failed");
-				console.log(chalk.red(e?.message || String(e)));
+				printError(chalk.red(e?.message || String(e)));
 				process.exit(1);
 			}
 		});

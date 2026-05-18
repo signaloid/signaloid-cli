@@ -1,8 +1,10 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printData, printError } from "../../utils/verbosity";
 
 async function resolveUserId(explicitUserId?: string) {
 	if (explicitUserId) return explicitUserId;
@@ -32,19 +34,23 @@ async function resolveUserId(explicitUserId?: string) {
  * ```
  */
 export default function github(program: Command) {
-	const cmd = program.command("github").description("GitHub integration");
+	const cmd = program.command("github").description("Connect and manage GitHub integration");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("status")
 		.description("Show current GitHub integration (for me or a given user)")
 		.option("--user-id <id>", "User ID (defaults to current user)")
 		.action(async (opts) => {
-			const spinner = ora("Fetching GitHub integration...").start();
+			const spinner = createSpinner("Fetching GitHub integration...");
 			try {
 				const userID = await resolveUserId(opts.userId);
 				const client = makeClient(await loadConfig());
 				const res = await client.github.getIntegration(userID);
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				const { GithubUsername, ...rest } = res as any;
+				const output = GithubUsername !== undefined ? { Username: GithubUsername, ...rest } : res;
+				printData(JSON.stringify(output, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to fetch integration");
 				await handleCliError(e);
@@ -52,21 +58,19 @@ export default function github(program: Command) {
 		});
 
 	cmd.command("connect")
-		.description("Create or update GitHub integration")
-		.requiredOption("--username <ghUser>", "GitHub username")
-		.requiredOption("--token <pat>", "GitHub Personal Access Token")
+		.description("Create or update GitHub integration via OAuth code")
+		.requiredOption("--token <code>", "GitHub OAuth authorization code")
 		.option("--user-id <id>", "User ID (defaults to current user)")
 		.action(async (opts) => {
-			const spinner = ora("Connecting GitHub...").start();
+			const spinner = createSpinner("Connecting GitHub...");
 			try {
 				const userID = await resolveUserId(opts.userId);
 				const client = makeClient(await loadConfig());
 				const res = await client.github.createOrUpdateIntegration(userID, {
-					GithubUsername: opts.username,
-					GithubToken: opts.token,
+					GithubAuthCode: opts.token,
 				});
 				spinner.succeed("GitHub connected/updated");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to connect/update GitHub");
 				await handleCliError(e);
@@ -77,13 +81,13 @@ export default function github(program: Command) {
 		.description("Delete GitHub integration")
 		.option("--user-id <id>", "User ID (defaults to current user)")
 		.action(async (opts) => {
-			const spinner = ora("Disconnecting GitHub...").start();
+			const spinner = createSpinner("Disconnecting GitHub...");
 			try {
 				const userID = await resolveUserId(opts.userId);
 				const client = makeClient(await loadConfig());
 				const res = await client.github.deleteIntegration(userID);
 				spinner.succeed("GitHub disconnected");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disconnect GitHub");
 				await handleCliError(e);
@@ -96,13 +100,13 @@ export default function github(program: Command) {
 		.option("--method <m>", "HTTP method (GET|POST|PUT|DELETE)", "GET")
 		.action(async (opts) => {
 			const pathArg = String(opts.path);
-			const spinner = ora(`Proxying ${opts.method} ${pathArg} ...`).start();
+			const spinner = createSpinner(`Proxying ${opts.method} ${pathArg} ...`);
 			try {
 				const client = makeClient(await loadConfig());
 				const method = String(opts.method || "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
 				const res = await client.github.proxyRequest(pathArg, method);
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Proxy request failed");
 				await handleCliError(e);
@@ -112,33 +116,57 @@ export default function github(program: Command) {
 	cmd.command("repos")
 		.description("List GitHub repos (via proxy: GET user/repos)")
 		.action(async () => {
-			const spinner = ora("Fetching GitHub repos...").start();
+			const spinner = createSpinner("Fetching GitHub repos...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.github.proxyRequest("user/repos", "GET");
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to list repos");
-				console.error(e?.message || String(e));
-				process.exit(1);
+				await handleCliError(e);
 			}
 		});
 
 	cmd.command("branches")
 		.description("List branches for a repo (via proxy)")
-		.requiredOption("--owner <owner>", "Repo owner")
-		.requiredOption("--repo <name>", "Repo name")
+		.option("--owner <owner>", "Repo owner (required unless --repo-id is used)")
+		.option("--repo <name>", "Repo name (required unless --repo-id is used)")
+		.option("--repo-id <id>", "Signaloid repository ID (resolves owner/repo automatically)")
 		.action(async (opts) => {
-			const spinner = ora("Fetching branches...").start();
 			try {
 				const client = makeClient(await loadConfig());
-				const path = `repos/${opts.owner}/${opts.repo}/branches`;
+				let owner = opts.owner;
+				let repo = opts.repo;
+
+				if (opts.repoId) {
+					const spinner = createSpinner("Resolving repository...");
+					const repoData = await client.repositories.getOne(String(opts.repoId));
+					const remoteURL = (repoData as any).RemoteURL || (repoData as any).remoteURL;
+					if (!remoteURL) {
+						spinner.fail("Repository has no remote URL");
+						process.exit(1);
+					}
+					const match = remoteURL.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+					if (!match) {
+						spinner.fail(`Cannot parse owner/repo from remote URL: ${remoteURL}`);
+						process.exit(1);
+					}
+					owner = match[1];
+					repo = match[2];
+					spinner.succeed(`Resolved to ${owner}/${repo}`);
+				} else if (!owner || !repo) {
+					printError("Either --repo-id or both --owner and --repo are required.");
+					process.exit(1);
+				}
+
+				const spinner = createSpinner("Fetching branches...");
+				const path = `repos/${owner}/${repo}/branches`;
 				const res = await client.github.proxyRequest(path, "GET");
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
-				spinner.fail("Failed to list branches");
+				createSpinner("").fail("Failed to list branches");
 				await handleCliError(e);
 			}
 		});

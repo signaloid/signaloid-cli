@@ -1,15 +1,17 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import {
 	OutputFormat,
+	displayResource,
 	createCustomTable,
 	parseColumns,
 	showAvailableColumns,
-	fetchWithPagination,
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printData } from "../../utils/verbosity";
 
 /**
  * Registers the 'buckets' command and subcommands for managing cloud storage buckets.
@@ -33,13 +35,13 @@ import { handleCliError } from "../../utils/error-handler";
  * ```
  */
 export default function buckets(program: Command) {
-	const cmd = program.command("buckets").description("Manage buckets");
+	const cmd = program.command("buckets").description("Manage cloud storage buckets");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("list")
 		.description("List buckets")
-		.option("--start-key <key>", "Pagination cursor token")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option("--format <type>", "Output format: json|table", "table")
+		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
 			// Show column help if requested
@@ -48,34 +50,51 @@ export default function buckets(program: Command) {
 				return;
 			}
 
-			const spinner = ora("Fetching buckets...").start();
+			const spinner = createSpinner("Fetching buckets...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
-				const result = await fetchWithPagination(
-					(startKey) => client.buckets.list(startKey ? { startKey: startKey } : undefined),
-					"Buckets",
-					targetCount,
-					spinner,
-					opts.startKey,
+				const listRes = await client.buckets.list();
+				const bucketIds: string[] = listRes.bucket_ids || [];
+
+				const buckets = await Promise.all(
+					bucketIds.map((id) => client.buckets.getOne(id)),
 				);
 
-				spinner.succeed("Buckets fetched");
+				spinner.succeed();
 
-				const format = (opts.format || "table") as OutputFormat;
+				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Buckets: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					console.log(JSON.stringify(output, null, 2));
+					printData(JSON.stringify({ Buckets: buckets }, null, 2));
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					console.log(createCustomTable("buckets", result.items, selectedColumns));
+					printData(createCustomTable("buckets", buckets, selectedColumns));
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to fetch buckets");
+				await handleCliError(e);
+			}
+		});
+
+	cmd.command("get")
+		.description("Get a bucket by ID")
+		.requiredOption("--bucket-id <id>", "Bucket ID")
+		.option("--format <type>", "Output format: table|json", "json")
+		.action(async (opts) => {
+			const id = String(opts.bucketId);
+			const spinner = createSpinner("Fetching bucket...");
+			try {
+				const client = makeClient(await loadConfig());
+				const res = await client.buckets.getOne(id);
+				spinner.succeed();
+				const format = (opts.format || "json") as OutputFormat;
+				if (format === "json") {
+					printData(JSON.stringify(res, null, 2));
+				} else {
+					displayResource(res, `Bucket: ${id}`);
+				}
+			} catch (e: any) {
+				spinner.fail("Failed to get bucket");
 				await handleCliError(e);
 			}
 		});
@@ -87,9 +106,8 @@ export default function buckets(program: Command) {
 		.option("--mount-path <path>", "Mount path (MountPath)")
 		.option("--read", "Enable read access (Read)")
 		.option("--write", "Enable write access (Write)")
-		.option("--region <region>", "Cloud region (Region)")
 		.action(async (opts) => {
-			const spinner = ora("Creating bucket...").start();
+			const spinner = createSpinner("Creating bucket...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -99,7 +117,6 @@ export default function buckets(program: Command) {
 					MountPath?: string;
 					Read?: boolean;
 					Write?: boolean;
-					Region?: string;
 				} = {
 					Name: opts.name,
 					Account: opts.account,
@@ -108,11 +125,10 @@ export default function buckets(program: Command) {
 				if (typeof opts.mountPath === "string") payload.MountPath = opts.mountPath;
 				if (typeof opts.read !== "undefined") payload.Read = !!opts.read;
 				if (typeof opts.write !== "undefined") payload.Write = !!opts.write;
-				if (typeof opts.region === "string") payload.Region = opts.region;
 
 				const res = await client.buckets.create(payload as any);
 				spinner.succeed("Bucket created");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create bucket");
 				await handleCliError(e);
@@ -127,10 +143,9 @@ export default function buckets(program: Command) {
 		.option("--mount-path <path>", "Mount path (MountPath)")
 		.option("--read", "Enable read access (Read)")
 		.option("--write", "Enable write access (Write)")
-		.option("--region <region>", "Cloud region (Region)")
 		.action(async (opts) => {
 			const bucketId = String(opts.bucketId);
-			const spinner = ora("Updating bucket...").start();
+			const spinner = createSpinner("Updating bucket...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -140,11 +155,10 @@ export default function buckets(program: Command) {
 				if (typeof opts.mountPath === "string") patch.MountPath = opts.mountPath;
 				if (typeof opts.read !== "undefined") patch.Read = !!opts.read;
 				if (typeof opts.write !== "undefined") patch.Write = !!opts.write;
-				if (typeof opts.region === "string") patch.Region = opts.region;
 
 				const res = await client.buckets.update(bucketId, patch as any);
 				spinner.succeed("Bucket updated");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update bucket");
 				await handleCliError(e);
@@ -156,12 +170,12 @@ export default function buckets(program: Command) {
 		.requiredOption("--bucket-id <id>", "Bucket ID")
 		.action(async (opts) => {
 			const bucketId = String(opts.bucketId);
-			const spinner = ora("Deleting bucket...").start();
+			const spinner = createSpinner("Deleting bucket...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.buckets.delete(bucketId);
 				spinner.succeed("Bucket deleted");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete bucket");
 				await handleCliError(e);

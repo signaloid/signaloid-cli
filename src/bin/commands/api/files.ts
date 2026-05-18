@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "../../utils/config";
@@ -15,6 +15,8 @@ import {
 } from "../../utils/output";
 import { FileItem } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printData } from "../../utils/verbosity";
 
 /**
  * Registers the 'files' command and subcommands for managing files in cloud storage.
@@ -43,7 +45,9 @@ import { handleCliError } from "../../utils/error-handler";
  * ```
  */
 export default function files(program: Command) {
-	const cmd = program.command("files").description("Manage files by path");
+	const cmd = program.command("files").description("Upload, download, and manage files in cloud storage");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	cmd.command("list")
 		.alias("ls")
@@ -51,7 +55,7 @@ export default function files(program: Command) {
 		.option("--path <p>", "Directory path (e.g., 'datasets/' )")
 		.option("--start-key <token>", "Pagination cursor token")
 		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option("--format <type>", "Output format: json|table", "table")
+		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
 			// Show column help if requested
@@ -60,7 +64,7 @@ export default function files(program: Command) {
 				return;
 			}
 
-			const spinner = ora("Listing files...").start();
+			const spinner = createSpinner("Listing files...");
 			try {
 				const client = makeClient(await loadConfig());
 				const targetCount = opts.count;
@@ -78,16 +82,16 @@ export default function files(program: Command) {
 
 				spinner.succeed();
 
-				const format = (opts.format || "table") as OutputFormat;
+				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
 					const output: any = { Files: result.items };
 					if (result.continuationKey) {
 						output.ContinuationKey = result.continuationKey;
 					}
-					console.log(JSON.stringify(output, null, 2));
+					printData(JSON.stringify(output, null, 2));
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					console.log(createCustomTable("files", result.items, selectedColumns));
+					printData(createCustomTable("files", result.items, selectedColumns));
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list files");
@@ -101,12 +105,12 @@ export default function files(program: Command) {
 		.requiredOption("--path <path>", "Path")
 		.action(async (opts) => {
 			const p = String(opts.path);
-			const spinner = ora("Fetching metadata...").start();
+			const spinner = createSpinner("Fetching metadata...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.files.get(p, false); // FileItem
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to stat file");
 				await handleCliError(e);
@@ -120,7 +124,7 @@ export default function files(program: Command) {
 		.option("--name <filename>", "Save as filename (defaults to last segment)")
 		.action(async (opts) => {
 			const p = String(opts.path);
-			const spinner = ora("Downloading...").start();
+			const spinner = createSpinner("Downloading...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -158,7 +162,7 @@ export default function files(program: Command) {
 				const savedPath = await writeBinary(outDir, base, fileBuf);
 
 				spinner.succeed("Saved 1 file");
-				console.log(JSON.stringify([savedPath], null, 2));
+				printData(JSON.stringify([savedPath], null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to download file");
 				await handleCliError(e);
@@ -171,7 +175,7 @@ export default function files(program: Command) {
 		.option("--from <localFile>", "Local file to upload")
 		.option("--text <string>", "Inline text content to upload")
 		.action(async (opts) => {
-			const spinner = ora("Uploading...").start();
+			const spinner = createSpinner("Uploading...");
 			try {
 				if (!opts.from && !opts.text) {
 					throw new Error("Provide --from <localFile> or --text <string>");
@@ -189,7 +193,7 @@ export default function files(program: Command) {
 
 				const res = await client.files.upload(opts.path, content);
 				spinner.succeed("File uploaded");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to upload");
 				await handleCliError(e);
@@ -201,12 +205,12 @@ export default function files(program: Command) {
 		.requiredOption("--path <path>", "Path")
 		.action(async (opts) => {
 			const p = String(opts.path);
-			const spinner = ora("Creating directory...").start();
+			const spinner = createSpinner("Creating directory...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.files.createDirectory(p);
 				spinner.succeed("Directory created");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create directory");
 				await handleCliError(e);
@@ -221,7 +225,7 @@ export default function files(program: Command) {
 		.option("--directory", "Path is directory (not a file)")
 		.action(async (opts) => {
 			const p = String(opts.path);
-			const spinner = ora("Deleting...").start();
+			const spinner = createSpinner("Deleting...");
 			try {
 				if (opts.recursive && opts.directory === undefined) {
 					opts.directory = true;
@@ -233,7 +237,7 @@ export default function files(program: Command) {
 					directory: Boolean(opts.directory),
 				});
 				spinner.succeed("Deleted");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete");
 				await handleCliError(e);
