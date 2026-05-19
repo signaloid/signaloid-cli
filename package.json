@@ -26,7 +26,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@signaloid/scce-sdk": "^2.0.0",
+    "@signaloid/scce-sdk": "^2.0.1",
     "commander": "13.1.0",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",
