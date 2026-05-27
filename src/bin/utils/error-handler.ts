@@ -1,6 +1,7 @@
-import ora, { Ora } from "ora";
+import { createSpinner, Spinner } from "./spinner";
 import chalk from "chalk";
 import { loadConfig } from "./config";
+import { printError, printTip } from "./verbosity";
 
 /**
  * Wraps an async function with consistent error handling and spinner management.
@@ -18,7 +19,7 @@ export async function withErrorHandling<T>(
 	failMessage: string,
 	fn: () => Promise<T>,
 ): Promise<T> {
-	const spinner = ora(spinnerText).start();
+	const spinner = createSpinner(spinnerText);
 	try {
 		const result = await fn();
 		if (successMessage) {
@@ -29,7 +30,7 @@ export async function withErrorHandling<T>(
 		return result;
 	} catch (e: any) {
 		spinner.fail(failMessage);
-		console.error(e?.message || String(e));
+		printError(e?.message || String(e));
 		process.exit(1);
 	}
 }
@@ -42,16 +43,16 @@ export async function withErrorHandlingCustom<T>(
 	spinnerText: string,
 	failMessage: string,
 	fn: () => Promise<T>,
-	onSuccess: (result: T, spinner: Ora) => void,
+	onSuccess: (result: T, spinner: Spinner) => void,
 ): Promise<T> {
-	const spinner = ora(spinnerText).start();
+	const spinner = createSpinner(spinnerText);
 	try {
 		const result = await fn();
 		onSuccess(result, spinner);
 		return result;
 	} catch (e: any) {
 		spinner.fail(failMessage);
-		console.error(e?.message || String(e));
+		printError(e?.message || String(e));
 		process.exit(1);
 	}
 }
@@ -82,10 +83,10 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 	if (isAuthError) {
 		const mode = cfg?.auth?.mode;
 
-		console.error(chalk.red(msg));
+		printError(chalk.red(msg));
 
 		if (mode === "jwt") {
-			console.error(
+			printTip(
 				chalk.yellow(
 					[
 						"",
@@ -98,7 +99,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 				),
 			);
 		} else if (mode === "apikey") {
-			console.error(
+			printTip(
 				chalk.yellow(
 					[
 						"",
@@ -112,7 +113,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 				),
 			);
 		} else {
-			console.error(
+			printTip(
 				chalk.yellow(
 					[
 						"",
@@ -127,14 +128,16 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 			);
 		}
 
-		process.exit(1);
+		process.exit(3);
 	}
 
 	// ---- NON-AUTH ERRORS ----
 	if (context) {
-		console.error(chalk.red(`${context} failed.`));
+		printError(chalk.red(`${context} failed.`));
 	}
 
-	console.error(msg);
-	process.exit(1);
+	printError(msg);
+
+	const isNotFound = status === 404;
+	process.exit(isNotFound ? 4 : 1);
 }

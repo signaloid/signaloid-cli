@@ -4,7 +4,6 @@ import path from "node:path";
 
 export type CLIConfig = {
 	profile?: string;
-	env?: "production";
 	apiEndpoint?: string;
 	websocketEndpoint?: string;
 	auth?: { mode: "apikey" | "email" | "jwt"; apiKey?: string; email?: string; token?: string };

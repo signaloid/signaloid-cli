@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import path from "path";
 import { loadConfig } from "../../utils/config";
 import { webReadableToBuffer, writeBinary } from "../../utils/fsx";
@@ -7,6 +7,8 @@ import { loadJsonIfPath } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
 import { PlotResponse } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printError } from "../../utils/verbosity";
 
 /**
  * Registers the 'plot' command and subcommands for generating plots and visualizations.
@@ -25,7 +27,9 @@ import { handleCliError } from "../../utils/error-handler";
  * ```
  */
 export default function plot(program: Command) {
-	const cmd = program.command("plot").description("Plotting API");
+	const cmd = program.command("plot").description("Generate plots and visualizations from data");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	// signaloid-cli plot ux-string --file payload.json
 	// signaloid-cli plot ux-string --ux-string <ux string>
@@ -39,12 +43,11 @@ export default function plot(program: Command) {
 		)
 		.option("--out <dir>", "Directory to save file")
 		.action(async (opts) => {
-			const spinner = ora("Plotting...").start();
-			if (!opts.uxString && !opts.file) {
-				spinner.fail("Either --ux-string or --file is required");
-				process.exit(1);
-			}
+			const spinner = createSpinner("Plotting...");
 			try {
+				if (!opts.uxString && !opts.file) {
+					throw new Error("Either --ux-string or --file is required");
+				}
 				const client = makeClient(await loadConfig());
 				let res: PlotResponse;
 				if (opts.file) {
@@ -56,8 +59,9 @@ export default function plot(program: Command) {
 				}
 
 				if (opts.outFile && !opts.uxString) {
+					printError("--out-file can only be used together with --ux-string");
 					spinner.fail("--out-file can only be used together with --ux-string");
-					process.exit(1);
+					process.exit(2);
 				}
 
 				const plotId = res.plotID;
@@ -93,7 +97,7 @@ export default function plot(program: Command) {
 		)
 		.option("--out <dir>", "Directory to save file")
 		.action(async (opts) => {
-			const spinner = ora("Plotting value...").start();
+			const spinner = createSpinner("Plotting value...");
 			try {
 				const client = makeClient(await loadConfig());
 				let taskID: string | undefined = opts.taskId;

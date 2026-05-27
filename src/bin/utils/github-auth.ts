@@ -29,25 +29,35 @@ export async function loginAndGetToken(outPath: string = process.cwd()): Promise
 		console.log(chalk.blue("Please create one at https://github.com/settings/tokens with the following scopes:"));
 		console.log(chalk.yellow("- read:packages (for npm)"));
 		console.log(chalk.yellow("- repo (for git clone)"));
-		const { token } = await inquirer.prompt([
-			{
-				type: "password",
-				name: "token",
-				message: "Enter your GitHub Personal Access Token:",
-				mask: "*",
-				validate: (input: string) => {
-					if (!input) {
-						return "Token cannot be empty.";
-					}
-					// Regex for classic (ghp_) and fine-grained (github_pat_) tokens
-					const githubTokenRegex = /^(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{84})$/;
-					if (!githubTokenRegex.test(input)) {
-						return "Invalid GitHub token format. Please check your token and try again.";
-					}
-					return true;
+		let token: string;
+		try {
+			const answers = await inquirer.prompt([
+				{
+					type: "password",
+					name: "token",
+					message: "Enter your GitHub Personal Access Token:",
+					mask: "*",
+					validate: (input: string) => {
+						if (!input) {
+							return "Token cannot be empty.";
+						}
+						// Regex for classic (ghp_) and fine-grained (github_pat_) tokens
+						const githubTokenRegex = /^(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{84})$/;
+						if (!githubTokenRegex.test(input)) {
+							return "Invalid GitHub token format. Please check your token and try again.";
+						}
+						return true;
+					},
 				},
-			},
-		]);
+			]);
+			token = answers.token;
+		} catch (e: any) {
+			if (e?.name === "ExitPromptError") {
+				console.log("\nCancelled.");
+				return { success: false, token: undefined };
+			}
+			throw e;
+		}
 		cachedToken = token;
 	}
 	try {

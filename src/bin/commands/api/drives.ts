@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "../../utils/config";
@@ -9,9 +9,10 @@ import {
 	createCustomTable,
 	parseColumns,
 	showAvailableColumns,
-	fetchWithPagination,
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printData } from "../../utils/verbosity";
 
 type DataSource = {
 	Object?: "DataSource";
@@ -100,13 +101,14 @@ async function collectDataSources(opts: {
  * ```
  */
 export default function drives(program: Command) {
-	const cmd = program.command("drives").description("Manage drives");
+	const cmd = program.command("drives").description("Manage virtual drives and data sources");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	// signaloid-cli drives list --start-key sk_123 --count 20
 	cmd.command("list")
-		.option("--start-key <key>", "Pagination cursor token")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option("--format <type>", "Output format: json|table", "table")
+		.description("List drives")
+		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
 			// Show column help if requested
@@ -115,51 +117,46 @@ export default function drives(program: Command) {
 				return;
 			}
 
-			const spinner = ora("Fetching drives...").start();
+			const spinner = createSpinner("Fetching drives...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
-				const result = await fetchWithPagination(
-					(startKey) => client.drives.list(startKey ? { startKey: String(startKey) } : undefined),
-					"Drives",
-					targetCount,
-					spinner,
-					opts.startKey,
+				const listRes = await client.drives.list();
+				const driveIds: string[] = listRes.drive_ids || [];
+
+				const drives = await Promise.all(
+					driveIds.map((id) => client.drives.getOne(id)),
 				);
 
 				spinner.succeed();
 
-				const format = (opts.format || "table") as OutputFormat;
+				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Drives: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					console.log(JSON.stringify(output, null, 2));
+					printData(JSON.stringify({ Drives: drives }, null, 2));
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					console.log(createCustomTable("drives", result.items, selectedColumns));
+					printData(createCustomTable("drives", drives, selectedColumns));
 				}
 			} catch (e: any) {
-				spinner.fail("Failed");
+				spinner.fail("Failed to list drives");
 				await handleCliError(e);
 			}
 		});
 
 	// signaloid-cli drives get --drive-id --drive-id <id>
 	cmd.command("get")
+		.description("Get a drive by ID")
 		.requiredOption("--drive-id <id>", "Drive ID")
 		.action(async (opts) => {
 			const id = String(opts.driveId);
-			const spinner = ora("Fetching drive...").start();
+			const spinner = createSpinner("Fetching drive...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.drives.getOne(id); // SDK method name
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
-				spinner.fail("Failed");
+				spinner.fail("Failed to get drive");
 				await handleCliError(e);
 			}
 		});
@@ -167,6 +164,7 @@ export default function drives(program: Command) {
 	// signaloid-cli drives create --name MyDrive --ds '{"ResourceID":"...","ResourceType":"Bucket","Location":"/"}'
 	// or: --ds-file ./datasources.json (array of DataSource)
 	cmd.command("create")
+		.description("Create a drive")
 		.requiredOption("--name <str>", "Name")
 		.option(
 			"--ds <json>",
@@ -180,7 +178,7 @@ export default function drives(program: Command) {
 		)
 		.option("--ds-file <path>", "Path to JSON array of DataSources")
 		.action(async (opts) => {
-			const spinner = ora("Creating drive...").start();
+			const spinner = createSpinner("Creating drive...");
 			try {
 				const client = makeClient(await loadConfig());
 				const dataSources = await collectDataSources(opts);
@@ -193,15 +191,16 @@ export default function drives(program: Command) {
 
 				const res = await client.drives.create(payload as any);
 				spinner.succeed("Drive created");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
-				spinner.fail("Failed");
+				spinner.fail("Failed to create drive");
 				await handleCliError(e);
 			}
 		});
 
 	// signaloid-cli drives update --drive-id <id> [--name ...] [--ds ...] [--ds-file ...]
 	cmd.command("update")
+		.description("Update a drive")
 		.requiredOption("--drive-id <id>", "Drive ID")
 		.option("--name <str>", "New name")
 		.option(
@@ -217,7 +216,7 @@ export default function drives(program: Command) {
 		.option("--ds-file <path>", "Path to JSON array of DataSources")
 		.action(async (opts) => {
 			const id = String(opts.driveId);
-			const spinner = ora("Updating drive...").start();
+			const spinner = createSpinner("Updating drive...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -228,26 +227,27 @@ export default function drives(program: Command) {
 
 				const res = await client.drives.update(id, patch as any);
 				spinner.succeed("Drive updated");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
-				spinner.fail("Failed");
+				spinner.fail("Failed to update drive");
 				await handleCliError(e);
 			}
 		});
 
 	// signaloid-cli drives delete --drive-id <id>
 	cmd.command("delete")
+		.description("Delete a drive")
 		.requiredOption("--drive-id <id>", "Drive ID")
 		.action(async (opts) => {
 			const id = String(opts.driveId);
-			const spinner = ora("Deleting drive...").start();
+			const spinner = createSpinner("Deleting drive...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.drives.delete(id);
 				spinner.succeed("Drive deleted");
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
-				spinner.fail("Failed");
+				spinner.fail("Failed to delete drive");
 				await handleCliError(e);
 			}
 		});

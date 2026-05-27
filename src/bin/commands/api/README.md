@@ -13,7 +13,7 @@ The Signaloid CLI provides a comprehensive command-line interface for interactin
 
 ## Command Files
 
-### Authentication & Environment
+### Authentication
 
 - **auth.ts** - Authentication management (login via API key or email/password, whoami, logout)
 - **keys.ts** - API key management (list, create, revoke)
@@ -39,7 +39,7 @@ The Signaloid CLI provides a comprehensive command-line interface for interactin
 - **buckets.ts** - S3-compatible bucket management (list, create, update, delete)
 - **drives.ts** - Virtual drive management (connect data sources like buckets and gateways)
 
-### IoT & Integration
+### Integration
 
 - **webhooks.ts** - Webhook integration (list, create, update, delete webhook endpoints for event notifications)
 

@@ -1,6 +1,7 @@
 import { table, getBorderCharacters } from "table";
 import chalk from "chalk";
-import ora from "ora";
+import { Spinner } from "./spinner";
+import { printData } from "./verbosity";
 
 export type OutputFormat = "json" | "table";
 
@@ -11,7 +12,7 @@ export async function fetchWithPagination<T>(
 	fetchFunction: (startKey?: string) => Promise<{ ContinuationKey?: string; [key: string]: any }>,
 	itemsKey: string,
 	targetCount?: number,
-	spinner?: ReturnType<typeof ora>,
+	spinner?: Spinner,
 	initialStartKey?: string,
 ): Promise<{ items: T[]; continuationKey?: string }> {
 	let allItems: T[] = [];
@@ -137,7 +138,14 @@ export const AVAILABLE_COLUMNS = {
 		dataSources: { key: "DataSources", header: "Data Sources", width: 40 },
 		created: { key: "CreatedAt", header: "Created", width: 25 },
 		updated: { key: "UpdatedAt", header: "Updated", width: 25 },
-	}
+	},
+	webhooks: {
+		id: { key: "webhookId", header: "Webhook ID", width: 30 },
+		url: { key: "url", header: "URL", width: 50 },
+		events: { key: "events", header: "Events", width: 30 },
+		status: { key: "status", header: "Status", width: 12 },
+		created: { key: "createdAt", header: "Created", width: 25 },
+	},
 };
 
 /**
@@ -152,6 +160,7 @@ export const DEFAULT_COLUMNS = {
 	keys: ["id", "name", "created", "validUntil"],
 	buckets: ["id", "name", "account", "region", "mountPath"],
 	drives: ["id", "name", "created", "updated"],
+	webhooks: ["id", "url", "status", "created"],
 };
 
 /**
@@ -170,7 +179,7 @@ export function parseColumns(columnString?: string): string[] | null {
  */
 export function showAvailableColumns(resourceType: keyof typeof AVAILABLE_COLUMNS): void {
 	const columns = AVAILABLE_COLUMNS[resourceType];
-	console.log(chalk.bold.cyan(`\nAvailable columns for ${resourceType}:\n`));
+	printData(chalk.bold.cyan(`\nAvailable columns for ${resourceType}:\n`));
 
 	const columnList = Object.entries(columns).map(([key, config]) => [key, config.header]);
 
@@ -184,9 +193,9 @@ export function showAvailableColumns(resourceType: keyof typeof AVAILABLE_COLUMN
 		},
 	);
 
-	console.log(helpTable);
-	console.log(chalk.gray(`\nDefault columns: ${DEFAULT_COLUMNS[resourceType].join(", ")}`));
-	console.log(chalk.gray(`\nUsage: --columns ${DEFAULT_COLUMNS[resourceType].slice(0, 3).join(",")}`));
+	printData(helpTable);
+	printData(chalk.gray(`\nDefault columns: ${DEFAULT_COLUMNS[resourceType].join(", ")}`));
+	printData(chalk.gray(`\nUsage: --columns ${DEFAULT_COLUMNS[resourceType].slice(0, 3).join(",")}`));
 }
 
 /**
@@ -271,14 +280,6 @@ function calculateDuration(start?: string | number, end?: string | number): stri
 }
 
 /**
- * Truncate string to max length
- */
-function truncate(str?: string, maxLen: number = 50): string {
-	if (!str) return "N/A";
-	return str.length > maxLen ? str.substring(0, maxLen - 3) + "..." : str;
-}
-
-/**
  * Format key from camelCase/PascalCase to Title Case
  */
 function formatKey(key: string): string {
@@ -302,32 +303,6 @@ function formatValue(value: any): string {
 	if (typeof value === "boolean") return value ? chalk.green("Yes") : chalk.red("No");
 	if (typeof value === "object") return JSON.stringify(value, null, 2);
 	return String(value);
-}
-
-/**
- * Guess file type from filename extension
- */
-function guessFileType(filename?: string): string {
-	if (!filename) return "Unknown";
-	const ext = filename.split(".").pop()?.toLowerCase();
-
-	const typeMap: Record<string, string> = {
-		c: "C Source",
-		cpp: "C++ Source",
-		h: "Header",
-		py: "Python",
-		js: "JavaScript",
-		ts: "TypeScript",
-		json: "JSON",
-		csv: "CSV",
-		txt: "Text",
-		md: "Markdown",
-		png: "Image",
-		jpg: "Image",
-		pdf: "PDF",
-	};
-
-	return typeMap[ext || ""] || "File";
 }
 
 /**
@@ -453,214 +428,11 @@ export function createCustomTable(
 }
 
 /**
- * Format a list of builds as a table
- */
-export function formatBuildsTable(builds: any[]): string {
-	if (!builds || builds.length === 0) {
-		return chalk.yellow("No builds found.");
-	}
-
-	const headers = ["Build ID", "Status", "Language", "Created", "Updated"];
-	const rows = builds.map((build) => {
-		const statusColor = getStatusColor(build.Status);
-		return [
-			build.BuildID || "N/A",
-			chalk[statusColor](build.Status || "Unknown"),
-			build.Language || "N/A",
-			formatDate(build.CreatedAt),
-			formatDate(build.UpdatedAt),
-		];
-	});
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format a list of tasks as a table
- */
-export function formatTasksTable(tasks: any[]): string {
-	if (!tasks || tasks.length === 0) {
-		return chalk.yellow("No tasks found.");
-	}
-
-	const headers = ["Task ID", "Build ID", "Status", "Created", "Duration"];
-	const rows = tasks.map((task) => {
-		const statusColor = getStatusColor(task.Status);
-		const duration = calculateDuration(task.CreatedAt, task.UpdatedAt);
-
-		return [
-			task.TaskID || "N/A",
-			task.BuildID || "N/A",
-			chalk[statusColor](task.Status || "Unknown"),
-			formatDate(task.CreatedAt),
-			duration,
-		];
-	});
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format cores list as a table
- */
-export function formatCoresTable(cores: any[]): string {
-	if (!cores || cores.length === 0) {
-		return chalk.yellow("No cores found.");
-	}
-
-	const headers = ["Core ID", "Name", "Class", "Precision", "Memory", "Microarch"];
-	const rows = cores.map((core) => [
-		core.CoreID || "N/A",
-		core.Name || "N/A",
-		core.Class || "N/A",
-		core.Precision?.toString() || "N/A",
-		core.MemorySize ? `${core.MemorySize} B` : "N/A",
-		core.Microarchitecture || "N/A",
-	]);
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format repositories as a table
- */
-export function formatReposTable(repos: any[]): string {
-	if (!repos || repos.length === 0) {
-		return chalk.yellow("No repositories found.");
-	}
-
-	const headers = ["Repo ID", "Name", "URL", "Branch", "Created"];
-	const rows = repos.map((repo) => [
-		repo.RepositoryID || "N/A",
-		repo.Name || "N/A",
-		repo.URL || "N/A",
-		repo.Branch || "main",
-		formatDate(repo.CreatedAt),
-	]);
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format files list as a table
- */
-export function formatFilesTable(files: any[]): string {
-	console.log("Files", files);
-
-	if (!files || files.length === 0) {
-		return chalk.yellow("No files found.");
-	}
-
-	const headers = ["Path", "Size", "Etag", "Last Modified"];
-	const rows = files.map((file) => [
-		file.Path || "N/A",
-		formatBytes(file.Size),
-		file.Etag || guessFileType(file.Name),
-		formatDate(file.LastModified || file.UpdatedAt),
-	]);
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format API keys as a table
- */
-export function formatKeysTable(keys: any[]): string {
-	if (!keys || keys.length === 0) {
-		return chalk.yellow("No API keys found.");
-	}
-
-	const headers = ["Key ID", "Name", "Created", "Valid Until", "Status"];
-	const rows = keys.map((key) => {
-		const isExpired = key.ValidUntil && new Date(key.ValidUntil) < new Date();
-		const status = isExpired ? chalk.red("Expired") : chalk.green("Active");
-
-		return [
-			truncate(key.KeyID || key.ID, 30) || "N/A",
-			truncate(key.Name, 30) || "N/A",
-			formatDate(key.CreatedAt),
-			key.ValidUntil ? formatDate(key.ValidUntil) : chalk.gray("Never"),
-			status,
-		];
-	});
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format buckets as a table
- */
-export function formatBucketsTable(buckets: any[]): string {
-	if (!buckets || buckets.length === 0) {
-		return chalk.yellow("No buckets found.");
-	}
-
-	const headers = ["Bucket ID", "Name", "Account", "Region", "Read", "Write"];
-	const rows = buckets.map((bucket) => [
-		truncate(bucket.BucketID || bucket.ID, 30) || "N/A",
-		truncate(bucket.Name, 25) || "N/A",
-		truncate(bucket.Account, 20) || "N/A",
-		bucket.Region || "N/A",
-		bucket.Read ? chalk.green("✓") : chalk.red("✗"),
-		bucket.Write ? chalk.green("✓") : chalk.red("✗"),
-	]);
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format drives as a table
- */
-export function formatDrivesTable(drives: any[]): string {
-	if (!drives || drives.length === 0) {
-		return chalk.yellow("No drives found.");
-	}
-
-	const headers = ["Drive ID", "Name", "Data Sources", "Created"];
-	const rows = drives.map((drive) => {
-		const dsCount = Array.isArray(drive.DataSources) ? drive.DataSources.length : 0;
-		return [
-			truncate(drive.DriveID || drive.ID, 30) || "N/A",
-			truncate(drive.Name, 30) || "N/A",
-			dsCount.toString(),
-			formatDate(drive.CreatedAt),
-		];
-	});
-
-	return createTable(headers, rows);
-}
-
-/**
- * Format webhooks as a table
- */
-export function formatWebhooksTable(webhooks: any[]): string {
-	if (!webhooks || webhooks.length === 0) {
-		return chalk.yellow("No webhooks found.");
-	}
-
-	const headers = ["Webhook ID", "URL", "Events", "Status", "Created"];
-	const rows = webhooks.map((webhook) => {
-		const eventCount = Array.isArray(webhook.Events) ? webhook.Events.length : 0;
-		const statusColor = webhook.Status === "active" ? "green" : "red";
-
-		return [
-			truncate(webhook.WebhookID || webhook.ID, 30) || "N/A",
-			truncate(webhook.URL, 40) || "N/A",
-			eventCount.toString(),
-			chalk[statusColor](webhook.Status || "Unknown"),
-			formatDate(webhook.CreatedAt),
-		];
-	});
-
-	return createTable(headers, rows);
-}
-
-/**
  * Display a single resource in a readable format
  */
 export function displayResource(resource: any, title?: string): void {
 	if (title) {
-		console.log(chalk.bold.cyan(`\n${title}\n`));
+		printData(chalk.bold.cyan(`\n${title}\n`));
 	}
 
 	const rows: string[][] = [];
@@ -681,17 +453,5 @@ export function displayResource(resource: any, title?: string): void {
 		},
 	});
 
-	console.log(output);
-}
-
-/**
- * Display output based on format preference
- */
-export function displayOutput(data: any, format: OutputFormat = "json"): void {
-	if (format === "json") {
-		console.log(JSON.stringify(data, null, 2));
-	} else {
-		// Default to JSON if no specific formatter is available
-		console.log(JSON.stringify(data, null, 2));
-	}
+	printData(output);
 }

@@ -1,7 +1,7 @@
-import { OutputStream } from "@signaloid/scce-sdk";
+import { OutputStream, CreateTaskRequest } from "@signaloid/scce-sdk";
 import { Command } from "commander";
 import path from "node:path";
-import ora from "ora";
+import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { writeBinary } from "../../utils/fsx";
 import {
@@ -15,17 +15,10 @@ import {
 import { loadJsonIfPath, parseKeyVals } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
+import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
+import { printData } from "../../utils/verbosity";
 
 const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
-
-type CreateTaskRequest = {
-	Arguments?: string;
-	DataSources?: Array<{
-		Location?: string;
-		ResourceID: string;
-		ResourceType: string;
-	}>;
-};
 
 /**
  * Registers the 'tasks' command and subcommands for managing execution tasks.
@@ -57,17 +50,20 @@ type CreateTaskRequest = {
  * ```
  */
 export default function tasks(program: Command) {
-	const cmd = program.command("tasks").description("Work with tasks");
+	const cmd = program.command("tasks").description("Create and manage execution tasks");
+	useGhStyleHelp(cmd);
+	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	// signaloid-cli tasks create --build-id <id> [--args "..."] [--params-file file.json] [--param Arguments="..."]
+	// signaloid-cli tasks create --build-id <id> [--args "..."] [--params-file file.json] [--param Arguments="..."] [--public]
 	cmd.command("create")
 		.description("Create a task from a build")
 		.requiredOption("--build-id <id>", "Build ID")
 		.option("--args <str>", "Default input arguments for the task")
 		.option("--params-file <file>", "JSON file with CreateTaskRequest")
 		.option("--param <k=v...>", "Inline param (repeatable)", (v, prev: string[]) => (prev ? [...prev, v] : [v]), [])
+		.option("--public", "Create a public task (accessible without authentication)")
 		.action(async (opts) => {
-			const spinner = ora("Creating task...").start();
+			const spinner = createSpinner("Creating task...");
 			try {
 				const client = makeClient(await loadConfig());
 
@@ -87,26 +83,33 @@ export default function tasks(program: Command) {
 					payload.Arguments = String(inline.Arguments);
 				}
 
-				// SDK here expects 2 args: (buildID, payload)
-				const res = await client.tasks.createTask(String(opts.buildId), payload);
+				const buildId = String(opts.buildId);
+				const res = opts.public
+					? await client.tasks.createPublicTask(buildId, payload)
+					: await client.tasks.createTask(buildId, payload);
 
-				spinner.succeed("Task created");
-				console.log(JSON.stringify(res, null, 2));
+				spinner.succeed(opts.public ? "Public task created" : "Task created");
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Task creation failed");
 				await handleCliError(e);
 			}
 		});
 
-	// signaloid-cli tasks list [--status ...] [--from iso] [--to iso] [--start-key key] [--count n]
+	// signaloid-cli tasks list [--status ...] [--from iso] [--to iso] [--start-key key] [--count n] [--limit n] [--summary]
 	cmd.command("list")
 		.description("List tasks")
-		.option("--status <s>", "Filter by status (Accepted|Initialising|In Progress|Completed|Cancelled|Stopped)")
+		.option(
+			"--status <s...>",
+			"Filter by status (Accepted|Initialising|In Progress|Completed|Cancelled|Stopped). Repeatable: --status Completed --status Cancelled",
+		)
 		.option("--from <iso>", "From timestamp (ISO)")
 		.option("--to <iso>", "To timestamp (ISO)")
 		.option("--start-key <key>", "Pagination cursor token")
 		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option("--format <type>", "Output format: json|table", "table")
+		.option("--limit <n>", "Per-request page size cap (max 25 expanded / 500 summary)", (v) => parseInt(v, 10))
+		.option("--summary", "Return summary rows (TaskID/Owner/CreatedAt) instead of expanded tasks")
+		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
 			// Show column help if requested
@@ -115,19 +118,24 @@ export default function tasks(program: Command) {
 				return;
 			}
 
-			const spinner = ora("Fetching tasks...").start();
+			const spinner = createSpinner("Fetching tasks...");
 			try {
 				const client = makeClient(await loadConfig());
 				const targetCount = opts.count;
 
 				const result = await fetchWithPagination(
-					(startKey) =>
-						client.tasks.list({
+					(startKey) => {
+						const params = {
 							status: opts.status,
 							from: opts.from,
 							to: opts.to,
 							startKey: startKey || opts.startKey,
-						}),
+							...(opts.limit !== undefined && { limit: opts.limit }),
+						};
+						return opts.summary
+							? client.tasks.listSummary(params)
+							: client.tasks.list(params);
+					},
 					"Tasks",
 					targetCount,
 					spinner,
@@ -135,16 +143,16 @@ export default function tasks(program: Command) {
 
 				spinner.succeed();
 
-				const format = (opts.format || "table") as OutputFormat;
+				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
 					const output: any = { Tasks: result.items };
 					if (result.continuationKey) {
 						output.ContinuationKey = result.continuationKey;
 					}
-					console.log(JSON.stringify(output, null, 2));
+					printData(JSON.stringify(output, null, 2));
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					console.log(createCustomTable("tasks", result.items, selectedColumns));
+					printData(createCustomTable("tasks", result.items, selectedColumns));
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list tasks");
@@ -152,22 +160,25 @@ export default function tasks(program: Command) {
 			}
 		});
 
-	// signaloid-cli tasks get --task-id <taskId>
+	// signaloid-cli tasks get --task-id <taskId> [--public]
 	cmd.command("get")
 		.description("Get one task")
 		.requiredOption("--task-id <id>", "Task ID")
-		.option("--format <type>", "Output format: json|table", "table")
+		.option("--public", "Fetch a public task without authentication scoping")
+		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Fetching task...").start();
+			const spinner = createSpinner("Fetching task...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.tasks.getOne(taskId);
+				const res = opts.public
+					? await client.tasks.getPublic(taskId)
+					: await client.tasks.getOne(taskId);
 				spinner.succeed();
 
-				const format = (opts.format || "table") as OutputFormat;
+				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					console.log(JSON.stringify(res, null, 2));
+					printData(JSON.stringify(res, null, 2));
 				} else {
 					displayResource(res, `Task: ${taskId}`);
 				}
@@ -183,53 +194,67 @@ export default function tasks(program: Command) {
 		.requiredOption("--task-id <id>", "Task ID")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Fetching status...").start();
+			const spinner = createSpinner("Fetching status...");
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.tasks.getStatus(taskId);
 				spinner.succeed();
-				console.log(JSON.stringify({ TaskID: taskId, Status: res }, null, 2));
+				printData(JSON.stringify({ TaskID: taskId, Status: res }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get status");
 				await handleCliError(e);
 			}
 		});
 
-	// signaloid-cli tasks output-urls --task-id <taskId>
+	// signaloid-cli tasks output-urls --task-id <taskId> [--public]
 	cmd.command("output-urls")
 		.description("Print URLs to task outputs")
 		.requiredOption("--task-id <id>", "Task ID")
+		.option("--public", "Fetch output URLs for a public task")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Fetching output URLs...").start();
+			const spinner = createSpinner("Fetching output URLs...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.tasks.getOutputURLs(taskId);
+				const res = opts.public
+					? await client.tasks.getPublicOutputURLs(taskId)
+					: await client.tasks.getOutputURLs(taskId);
 				spinner.succeed();
-				console.log(JSON.stringify(res, null, 2));
+				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to get output URLs");
 				await handleCliError(e);
 			}
 		});
 
-	// signaloid-cli tasks output --task-id <taskId> [--stream stdout|stderr] [--out ./outputs]
+	// signaloid-cli tasks output --task-id <taskId> [--stream stdout|stderr] [--skip-cache] [--out ./outputs]
 	cmd.command("output")
 		.description("Download task output as text")
 		.requiredOption("--task-id <id>", "Task ID")
 		.option("--stream <stdout|stderr>", "Which stream to fetch", "stdout")
+		.option("--skip-cache", "Bypass the server-side output cache and read fresh from S3", false)
 		.option("--out <dir>", "Path to save file")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Downloading output...").start();
+			const spinner = createSpinner("Downloading output...");
 			try {
 				const client = makeClient(await loadConfig());
 
 				const streamOpt = String(opts.stream || "stdout").toLowerCase();
+				if (streamOpt !== "stdout" && streamOpt !== "stderr") {
+					spinner.fail(`Invalid --stream value: ${opts.stream}. Expected 'stdout' or 'stderr'.`);
+					process.exitCode = 1;
+					return;
+				}
 				const outStream = streamOpt === "stderr" ? "Stderr" : "Stdout";
+				const skipCache = Boolean(opts.skipCache);
 
-				// SDK: getOutput(taskID, outStream) -> string
-				const outputRes: string = await client.tasks.getOutput(taskId, outStream as OutputStream);
+				// SDK: getOutput(taskID, outStream, { skipCache }) -> string
+				const outputRes: string = await client.tasks.getOutput(
+					taskId,
+					outStream as OutputStream,
+					skipCache ? { skipCache: true } : undefined,
+				);
 				const outOpt = opts.out;
 				if (outOpt) {
 					// Use Node.js path utilities for proper path handling
@@ -237,11 +262,12 @@ export default function tasks(program: Command) {
 					const outDir = path.dirname(fullPath);
 					const fileName = path.basename(fullPath);
 
-					// writeBinary(dir, filename, buf)
-					await writeBinary(outDir, fileName, Buffer.from(JSON.stringify(outputRes, null, 2), "utf-8"));
+					const content = typeof outputRes === "string" ? outputRes : JSON.stringify(outputRes, null, 2);
+					await writeBinary(outDir, fileName, Buffer.from(content, "utf-8"));
 					spinner.succeed(`Saved: ${fullPath}`);
 				} else {
-					spinner.succeed(JSON.stringify(outputRes, null, 2));
+					spinner.succeed();
+					printData(outputRes);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to download output");
@@ -255,12 +281,12 @@ export default function tasks(program: Command) {
 		.requiredOption("--task-id <id>", "Task ID")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Canceling task...").start();
+			const spinner = createSpinner("Canceling task...");
 			try {
 				const client = makeClient(await loadConfig());
 				await client.tasks.cancel(taskId);
 				spinner.succeed("Cancel requested");
-				console.log(JSON.stringify({ TaskID: taskId, cancelled: true }, null, 2));
+				printData(JSON.stringify({ TaskID: taskId, cancelled: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to cancel task");
 				await handleCliError(e);
@@ -273,12 +299,12 @@ export default function tasks(program: Command) {
 		.requiredOption("--task-id <id>", "Task ID")
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora("Deleting task...").start();
+			const spinner = createSpinner("Deleting task...");
 			try {
 				const client = makeClient(await loadConfig());
 				await client.tasks.deleteOne(taskId);
 				spinner.succeed("Task deleted");
-				console.log(JSON.stringify({ TaskID: taskId, deleted: true }, null, 2));
+				printData(JSON.stringify({ TaskID: taskId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete task");
 				await handleCliError(e);
@@ -292,7 +318,7 @@ export default function tasks(program: Command) {
 		.option("--timeout <sec>", "Timeout in seconds (default 60)", (v) => parseInt(v, 10))
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
-			const spinner = ora(`Waiting for task ${taskId}...`).start();
+			const spinner = createSpinner(`Waiting for task ${taskId}...`);
 			try {
 				const client = makeClient(await loadConfig());
 				const status = await client.tasks.waitForTask(taskId, {
