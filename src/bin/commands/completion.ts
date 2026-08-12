@@ -12,8 +12,8 @@ import { useGhStyleHelp, addLearnMore, addExamples } from "../utils/help-formatt
  * @example
  * ```
  * # Install bash completion
- * signaloid-cli completion bash > /etc/bash_completion.d/signaloid-cli
- * source /etc/bash_completion.d/signaloid-cli
+ * signaloid-cli completion bash > ~/.bash_completion.d/signaloid-cli
+ * source ~/.bash_completion.d/signaloid-cli
  *
  * # Install zsh completion
  * signaloid-cli completion zsh > /usr/local/share/zsh/site-functions/_signaloid-cli
@@ -71,8 +71,8 @@ function generateBashCompletion(): string {
 
 # Bash completion for signaloid-cli
 # To install:
-#   signaloid-cli completion bash > /etc/bash_completion.d/signaloid-cli
-#   source /etc/bash_completion.d/signaloid-cli
+#   signaloid-cli completion bash > ~/.bash_completion.d/signaloid-cli
+#   source ~/.bash_completion.d/signaloid-cli
 
 _signaloid_cli_completion() {
     local cur prev words cword

@@ -13,6 +13,7 @@ import {
 import { makeClient } from "../../utils/sdk";
 import { createSpinner } from "../../utils/spinner";
 import { printData, printError } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 /**
  * Registers the 'repos' command and subcommands for managing code repositories.
@@ -155,10 +156,10 @@ export default function repos(program: Command) {
 	cmd.command("connect")
 		.description("Connect a repository")
 		.requiredOption("--url <gitUrl>", "Remote Git URL (RemoteURL)")
-		.option("--commit <sha>", "Commit (Commit)")
-		.option("--branch <name>", "Branch (Branch)")
-		.option("--dir <path>", "Build directory (BuildDirectory)")
-		.option("--args <args>", "Default arguments (Arguments)")
+		.option("--commit <sha>", "Commit SHA")
+		.option("--branch <name>", "Branch name")
+		.option("--dir <path>", "Build directory")
+		.option("--args <args>", "Default runtime arguments")
 		.option("--core-id <coreId>", "Core ID")
 		.option(
 			"--trace-variables <json>",
@@ -186,13 +187,13 @@ export default function repos(program: Command) {
 					printError(
 						"Please use an HTTPS Git URL (e.g., https://github.com/user/repo). SSH URLs are not accepted by the API.",
 					);
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				if (!parsedUrl || parsedUrl.protocol !== "https:") {
 					spinner.fail("Invalid repository URL");
 					printError("Please provide an HTTPS Git repository URL (e.g., https://github.com/user/repo).");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				const client = makeClient(await loadConfig());
@@ -248,7 +249,7 @@ export default function repos(program: Command) {
 		.option("--commit <sha>", "Commit")
 		.option("--branch <name>", "Branch")
 		.option("--dir <path>", "Build directory")
-		.option("--args <args>", "Default arguments")
+		.option("--args <args>", "Default runtime arguments")
 		.option("--core-id <coreId>", "Core ID")
 		.option(
 			"--trace-variables <json>",
@@ -302,7 +303,7 @@ export default function repos(program: Command) {
 				const removeFields: string[] = Array.isArray(opts.remove) ? opts.remove : [];
 				if (removeFields.length > 0 && Object.keys(patch).length > 0) {
 					spinner.fail("Cannot combine --remove with other update fields in the same request");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				const res = await client.repositories.update(repoId, patch as any, {

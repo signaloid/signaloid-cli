@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import inquirer from "inquirer";
 import { createSpinner } from "../utils/spinner";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 
 import { loginAndGetToken, LoginResult } from "../utils/github-auth";
 import { customizeTemplate } from "./customize";
@@ -36,7 +36,7 @@ async function cloneRepository(projectDir: string, repoUrlSsh: string, repoUrlHt
 		// --- HTTPS Fallback with Current Directory ---
 		const currentDir = process.cwd();
 
-		const tempGitConfigPath = path.join(currentDir, `.gitconfig-signaloid-temp-${uuidv4()}`);
+		const tempGitConfigPath = path.join(currentDir, `.gitconfig-signaloid-temp-${randomUUID()}`);
 		const tempNetrcPath = path.join(currentDir, ".netrc");
 		const tempNpmrcPath = path.join(currentDir, ".npmrc");
 
@@ -262,6 +262,20 @@ export async function createDemo(
 			jsonSpinner.fail("Failed to write JSON configuration file.");
 			console.error(error);
 		}
+	}
+
+	// Persist config so init web-app:export can read it back from the project later.
+	try {
+		const projectConfig = {
+			applicationDetails: appDetails,
+			inputs: inputs,
+		};
+		await fs.writeFile(
+			path.join(projectDir, "signaloid.config.json"),
+			JSON.stringify(projectConfig, null, 2),
+		);
+	} catch (error) {
+		console.error(chalk.yellow("Warning: could not write signaloid.config.json to the project."));
 	}
 
 	// --- Generate Files ---

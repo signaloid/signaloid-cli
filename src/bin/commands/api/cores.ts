@@ -11,7 +11,8 @@ import {
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { printData, printInfo } from "../../utils/verbosity";
+import { printData } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 /**
  * Registers the 'cores' command and subcommands for managing Signaloid computation cores.
@@ -58,7 +59,7 @@ export default function cores(program: Command) {
 
 			if (opts.default && opts.custom) {
 				console.error("Cannot use --default and --custom together.");
-				process.exit(1);
+				process.exit(EXIT_CODES.USAGE);
 			}
 
 			const spinner = createSpinner("Fetching cores...");
@@ -76,7 +77,7 @@ export default function cores(program: Command) {
 					return out;
 				};
 
-				// Server semantics: omit `default` -> custom cores; pass `default: true` -> default cores.
+				// Omitting default returns custom cores, passing default true returns default cores.
 				const sources: { default?: boolean }[] = opts.default
 					? [{ default: true }]
 					: opts.custom
@@ -94,13 +95,9 @@ export default function cores(program: Command) {
 					}
 				}
 
-				if (allCores.length === 0) {
-					spinner.fail("No cores found");
-					process.exit(1);
-				}
-
 				spinner.succeed();
 
+				// An empty result is a success, so print the empty structure and exit 0.
 				const result = { Cores: allCores, Count: allCores.length };
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {

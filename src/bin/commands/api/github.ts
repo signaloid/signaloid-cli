@@ -5,6 +5,7 @@ import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData, printError } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 async function resolveUserId(explicitUserId?: string) {
 	if (explicitUserId) return explicitUserId;
@@ -145,19 +146,19 @@ export default function github(program: Command) {
 					const remoteURL = (repoData as any).RemoteURL || (repoData as any).remoteURL;
 					if (!remoteURL) {
 						spinner.fail("Repository has no remote URL");
-						process.exit(1);
+						process.exit(EXIT_CODES.ERROR);
 					}
 					const match = remoteURL.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
 					if (!match) {
 						spinner.fail(`Cannot parse owner/repo from remote URL: ${remoteURL}`);
-						process.exit(1);
+						process.exit(EXIT_CODES.ERROR);
 					}
 					owner = match[1];
 					repo = match[2];
 					spinner.succeed(`Resolved to ${owner}/${repo}`);
 				} else if (!owner || !repo) {
 					printError("Either --repo-id or both --owner and --repo are required.");
-					process.exit(1);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				const spinner = createSpinner("Fetching branches...");

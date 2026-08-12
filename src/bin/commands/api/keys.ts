@@ -16,6 +16,7 @@ import { parseDuration } from "../../utils/time";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData, printError, printInfo } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 import inquirer from "inquirer";
 
 /**
@@ -110,7 +111,7 @@ export default function keys(program: Command) {
 
 				let validUntil: number | null = null;
 
-				// --valid-until
+				// The keys endpoint expects ValidUntil in epoch seconds (builds and tasks use milliseconds).
 				if (opts.validUntil) {
 					const date = new Date(opts.validUntil);
 					if (isNaN(date.getTime())) {
@@ -149,7 +150,7 @@ export default function keys(program: Command) {
 		.action(async (opts) => {
 			if (opts.keyId && opts.apiKey) {
 				printError("Use either --key-id or --api-key, not both.");
-				process.exitCode = 1;
+				process.exitCode = EXIT_CODES.USAGE;
 				return;
 			}
 
@@ -182,8 +183,9 @@ export default function keys(program: Command) {
 
 				function formatDate(value: unknown): string {
 					if (!value) return "—";
-					const ts = typeof value === "number" ? value * 1000 : value;
-					const d = new Date(ts as string | number);
+					// Keys timestamps are epoch seconds, so multiply by 1000 for a JS Date.
+					const seconds = typeof value === "number" ? value : Number(value);
+					const d = new Date(isNaN(seconds) ? (value as string) : seconds * 1000);
 					return isNaN(d.getTime()) ? String(value) : d.toISOString().slice(0, 10);
 				}
 
@@ -262,7 +264,7 @@ export default function keys(program: Command) {
 								`or directly from your account settings at: ${chalk.cyan(`${config.SIGNALOID_URL}/settings/api`)}`,
 						),
 					);
-					process.exitCode = 1;
+					process.exitCode = EXIT_CODES.ERROR;
 				} else {
 					spinner.succeed("API key is valid.");
 				}

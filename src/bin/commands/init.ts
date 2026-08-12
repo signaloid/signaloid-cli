@@ -1,5 +1,7 @@
 import { Command } from "commander";
 import { createDemo } from "../init/demo";
+import { exportWebAppConfig } from "../init/export-config";
+import { EXIT_CODES } from "../utils/exit-codes";
 import inquirer from "inquirer";
 import path from "path";
 import { promises as fs } from "fs";
@@ -86,7 +88,10 @@ export default function (program: Command) {
 			await createDemo(name, outputDir, options.jsonOutput, options.jsonInput);
 
 			const projectPath = path.join(outputDir, name);
-			const envFiles = [path.join(projectPath, "src", "environments", "environment.ts")];
+			const envFiles = [
+				path.join(projectPath, "src", "environments", "environment.ts"),
+				path.join(projectPath, "src", "environments", "environment.development.ts"),
+			];
 
 			const apiKeyProperty = `\nSIGNALOID_API_KEY: '${apiKey}'`;
 
@@ -101,6 +106,28 @@ export default function (program: Command) {
 			} catch (error) {
 				// The spinner (if used) should be failed here.
 				console.error("Failed to update environment files.");
+			}
+		});
+
+	initDemo
+		.command("web-app:export")
+		.description("Export an existing web app's configuration as JSON")
+		.requiredOption("--project <dir>", "Path to the generated web-app project")
+		.option("--out <path>", "Write the config JSON to this path instead of stdout")
+		.action(async (options: { project: string; out?: string }) => {
+			try {
+				const webAppConfig = await exportWebAppConfig(options.project);
+				const json = JSON.stringify(webAppConfig, null, 2);
+				if (options.out) {
+					const resolvedOut = path.resolve(options.out);
+					await fs.writeFile(resolvedOut, json);
+					console.log(chalk.green(`Configuration exported to ${resolvedOut}`));
+				} else {
+					console.log(json);
+				}
+			} catch (error: any) {
+				console.error(chalk.red(error.message));
+				process.exitCode = EXIT_CODES.ERROR;
 			}
 		});
 }

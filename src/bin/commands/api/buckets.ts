@@ -41,6 +41,7 @@ export default function buckets(program: Command) {
 
 	cmd.command("list")
 		.description("List buckets")
+		.option("--start-key <key>", "Pagination cursor token")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -54,7 +55,7 @@ export default function buckets(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const listRes = await client.buckets.list();
+				const listRes = await client.buckets.list(opts.startKey ? { startKey: opts.startKey } : undefined);
 				const bucketIds: string[] = listRes.bucket_ids || [];
 
 				const buckets = await Promise.all(

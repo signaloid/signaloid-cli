@@ -2,6 +2,7 @@ import { createSpinner, Spinner } from "./spinner";
 import chalk from "chalk";
 import { loadConfig } from "./config";
 import { printError, printTip } from "./verbosity";
+import { EXIT_CODES } from "./exit-codes";
 
 /**
  * Wraps an async function with consistent error handling and spinner management.
@@ -31,7 +32,7 @@ export async function withErrorHandling<T>(
 	} catch (e: any) {
 		spinner.fail(failMessage);
 		printError(e?.message || String(e));
-		process.exit(1);
+		process.exit(EXIT_CODES.ERROR);
 	}
 }
 
@@ -53,7 +54,7 @@ export async function withErrorHandlingCustom<T>(
 	} catch (e: any) {
 		spinner.fail(failMessage);
 		printError(e?.message || String(e));
-		process.exit(1);
+		process.exit(EXIT_CODES.ERROR);
 	}
 }
 
@@ -67,7 +68,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 
 	const code = e.code ?? e.details?.code;
 
-	const status = e.response?.status ?? e.details?.response?.status;
+	const status = e.status ?? e.response?.status ?? e.details?.response?.status;
 
 	const msg = e.message || e.details || e.details?.message || "An error occurred";
 
@@ -128,7 +129,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 			);
 		}
 
-		process.exit(3);
+		process.exit(EXIT_CODES.AUTH);
 	}
 
 	// ---- NON-AUTH ERRORS ----
@@ -139,5 +140,5 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 	printError(msg);
 
 	const isNotFound = status === 404;
-	process.exit(isNotFound ? 4 : 1);
+	process.exit(isNotFound ? EXIT_CODES.NOT_FOUND : EXIT_CODES.ERROR);
 }

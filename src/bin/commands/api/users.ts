@@ -1,4 +1,4 @@
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
@@ -26,7 +26,7 @@ function toEpochMs(iso?: string): number | undefined {
  *
  * Available subcommands:
  * - me: Get current authenticated user information
- * - update: Update current user's profile (name, email, preferences)
+ * - update: Update current user's profile (role, industry, preferences)
  * - logs: Fetch activity logs for the current user
  * - logout-all: Invalidate all sessions for a specific user
  *
@@ -35,7 +35,7 @@ function toEpochMs(iso?: string): number | undefined {
  * @example
  * ```
  * signaloid-cli users me
- * signaloid-cli users update --name "John Doe" --email john@example.com
+ * signaloid-cli users update --pref Editor_Theme=dark --role engineering
  * signaloid-cli users logs --from 2025-01-01T00:00:00Z --to 2025-12-31T23:59:59Z
  * signaloid-cli users logout-all --user-id user-123
  * ```
@@ -109,12 +109,15 @@ export default function users(program: Command) {
 			}
 		});
 
-	// signaloid-cli users update [--pref Key=Value ...] [--payload-file file.json]
-	// API only supports updating Preferences
+	// signaloid-cli users update [--pref Key=Value ...] [--role r] [--industry i] [--payload-file file.json]
 	cmd.command("update")
-		.description("Update current user preferences")
+		.description("Update current user profile and preferences")
 		.option("--pref <key=value>", "Set a preference (repeatable)", (v: string, prev: string[]) => (prev ? [...prev, v] : [v]), [] as string[])
 		.option("--remove <field>", "Remove a preference field (repeatable, allowed: Editor_Execution_DataSources, Editor_Execution_Core)", (v: string, prev: string[]) => (prev ? [...prev, v] : [v]), [] as string[])
+		.addOption(new Option("--role <role>", "Set your role").conflicts("clearRole"))
+		.addOption(new Option("--industry <industry>", "Set your industry").conflicts("clearIndustry"))
+		.addOption(new Option("--clear-role", "Clear your role"))
+		.addOption(new Option("--clear-industry", "Clear your industry"))
 		.option("--payload-file <json>", "JSON file with Preferences object")
 		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
@@ -125,14 +128,15 @@ export default function users(program: Command) {
 				const me = await client.users.me();
 				const userID = me.UserID;
 
-				// Start with current preferences (strip UpdatedAt)
+				// Start with current preferences, dropping UpdatedAt.
 				const { UpdatedAt, ...currentPrefs } = (me.Preferences || {}) as Record<string, unknown>;
 				const prefs: Record<string, string> = { ...currentPrefs } as Record<string, string>;
 
-				// Merge from payload file
+				// Merge the payload file, unwrapping its Preferences key if present.
 				if (opts.payloadFile) {
 					const extra = (await loadJsonIfPath(opts.payloadFile)) || {};
-					Object.assign(prefs, extra);
+					const extraPrefs = (extra.Preferences ?? extra) as Record<string, unknown>;
+					Object.assign(prefs, extraPrefs);
 				}
 
 				// Merge inline --pref flags
@@ -143,9 +147,30 @@ export default function users(program: Command) {
 					}
 				}
 
-				const patch = { Preferences: prefs };
+				const hasPrefInput = Boolean(opts.payloadFile) || (opts.pref as string[]).length > 0;
+				const hasProfileInput =
+					opts.role !== undefined ||
+					opts.industry !== undefined ||
+					Boolean(opts.clearRole) ||
+					Boolean(opts.clearIndustry);
+
+				// Keep resending current preferences as before, unless the
+				// update only touches profile fields
+				const patch: Record<string, unknown> = {};
+				if (hasPrefInput || !hasProfileInput) {
+					patch.Preferences = prefs;
+				}
+				if (opts.role !== undefined || opts.clearRole) {
+					patch.Role = opts.clearRole ? null : opts.role;
+				}
+				if (opts.industry !== undefined || opts.clearIndustry) {
+					patch.Industry = opts.clearIndustry ? null : opts.industry;
+				}
 				const removeFields = (opts.remove as string[]) || [];
-				const res = await client.users.update(userID, patch as any, removeFields.length > 0 ? { remove: removeFields } : undefined);
+				const res =
+					removeFields.length > 0
+						? await client.users.update(userID, patch as any, { remove: removeFields })
+						: await client.users.update(userID, patch as any);
 				spinner.succeed("User updated");
 
 				const format = (opts.format || "json") as OutputFormat;

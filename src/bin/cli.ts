@@ -29,12 +29,15 @@ import github from "./commands/api/github";
 import { useGhStyleHelp } from "./utils/help-formatter";
 import { setVerbosity } from "./utils/verbosity";
 
+// Read version from package.json so --version always matches the published release.
+const { version } = require("../../package.json") as { version: string };
+
 const program = new Command();
 
 program
 	.name("signaloid-cli")
 	.description("Signaloid CLI — Command-line interface for the Signaloid Cloud Compute Engine")
-	.version("2.0.0")
+	.version(version)
 	.option("-d, --debug", "Output extra debugging")
 	.option("--json", "Machine-readable JSON output")
 	.option("--verbosity <n>", "Output verbosity level: 0=silent, 1=errors only, 2=full", "2")
