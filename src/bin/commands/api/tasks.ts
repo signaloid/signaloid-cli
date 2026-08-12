@@ -17,6 +17,7 @@ import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
 
@@ -243,7 +244,7 @@ export default function tasks(program: Command) {
 				const streamOpt = String(opts.stream || "stdout").toLowerCase();
 				if (streamOpt !== "stdout" && streamOpt !== "stderr") {
 					spinner.fail(`Invalid --stream value: ${opts.stream}. Expected 'stdout' or 'stderr'.`);
-					process.exitCode = 1;
+					process.exitCode = EXIT_CODES.USAGE;
 					return;
 				}
 				const outStream = streamOpt === "stderr" ? "Stderr" : "Stdout";

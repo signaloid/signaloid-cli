@@ -108,6 +108,7 @@ export default function drives(program: Command) {
 	// signaloid-cli drives list --start-key sk_123 --count 20
 	cmd.command("list")
 		.description("List drives")
+		.option("--start-key <key>", "Pagination cursor token")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -121,7 +122,7 @@ export default function drives(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const listRes = await client.drives.list();
+				const listRes = await client.drives.list(opts.startKey ? { startKey: opts.startKey } : undefined);
 				const driveIds: string[] = listRes.drive_ids || [];
 
 				const drives = await Promise.all(

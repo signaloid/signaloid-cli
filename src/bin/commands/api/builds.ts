@@ -6,6 +6,7 @@ import { createSpinner } from "../../utils/spinner";
 import chalk from "chalk";
 import { loadConfig } from "../../utils/config";
 import { writeBinary } from "../../utils/fsx";
+import { resolveDownloadFilename } from "../../utils/download-filename";
 import { makeClient } from "../../utils/sdk";
 import {
 	displayResource,
@@ -142,8 +143,8 @@ export default function builds(program: Command) {
 			"--data-sources <json>",
 			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
-		.option("--public", "Mark the build as publicly accessible (sets IsPublic=true)")
-		.option("--discover-variables", "Request the build to discover traceable variables (sets DiscoverVariables=true query param)")
+		.option("--public", "Mark the build as publicly accessible")
+		.option("--discover-variables", "Request the build to discover traceable variables")
 		.option("--config-mk <path>", "Path to a config.mk file")
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating build (source code)...");
@@ -334,7 +335,14 @@ export default function builds(program: Command) {
 		.requiredOption("--repo-id <id>", "Repository ID")
 		.option("--args <args>", "Default runtime arguments")
 		.option("--core-id <coreId>", "Core ID")
-		.option("--discover-vars", "Ask server to discover variables", false)
+		.option(
+			"--discover-variables",
+			"Request the build to discover traceable variables",
+			false,
+		)
+		.addOption(
+			new (require("commander").Option)("--discover-vars", "Alias for --discover-variables").hideHelp(),
+		)
 		.option(
 			"--trace-variables <json>",
 			'JSON array of TraceVariable objects, e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
@@ -383,7 +391,7 @@ export default function builds(program: Command) {
 				const res = await client.builds.createFromRepository(
 					String(opts.repoId),
 					Object.keys(payload).length ? payload : undefined,
-					!!opts.discoverVars,
+					!!(opts.discoverVariables || opts.discoverVars),
 				);
 
 				spinner.succeed("Build created");
@@ -394,10 +402,16 @@ export default function builds(program: Command) {
 			}
 		});
 
-	// signaloid-cli builds update --build-id <buildId> [--public | --private]
+	// signaloid-cli builds update --build-id <buildId> [--visibility <public|private> | --public | --private]
 	cmd.command("update")
 		.description("Update build properties")
 		.requiredOption("--build-id <id>", "Build ID")
+		.addOption(
+			new (require("commander").Option)("--visibility <value>", "Set build visibility").choices([
+				"public",
+				"private",
+			]),
+		)
 		.addOption(
 			new (require("commander").Option)("--public", "Make the build public").conflicts("private"),
 		)
@@ -410,7 +424,9 @@ export default function builds(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const payload: { IsPublic?: boolean } = {};
-				if (opts.public) payload.IsPublic = true;
+				if (opts.visibility === "public") payload.IsPublic = true;
+				else if (opts.visibility === "private") payload.IsPublic = false;
+				else if (opts.public) payload.IsPublic = true;
 				else if (opts.private) payload.IsPublic = false;
 				const res = await client.builds.updateOne(buildId, payload);
 				spinner.succeed("Build updated");
@@ -470,7 +486,7 @@ export default function builds(program: Command) {
 		.description("Get download URL for the build binary, or download it with --out")
 		.requiredOption("--build-id <id>", "Build ID")
 		.option("--out <dir>", "Directory to download the binary to")
-		.option("--filename <name>", "Override the saved filename (default: build-<id>.bin)")
+		.option("--filename <name>", "Override the saved filename (default: the name the server provides)")
 		.option("--url-only", "Print only the presigned URL even when --out is set", false)
 		.action(async (opts) => {
 			const buildId = String(opts.buildId);
@@ -479,7 +495,12 @@ export default function builds(program: Command) {
 				const client = makeClient(await loadConfig());
 				const res = await client.builds.getBinary(buildId);
 
-				if (opts.urlOnly || !opts.out) {
+				if (opts.urlOnly) {
+					spinner.succeed();
+					printData(res.url ? res.url : "");
+					return;
+				}
+				if (!opts.out) {
 					spinner.succeed();
 					printData(JSON.stringify(res, null, 2));
 					return;
@@ -499,7 +520,9 @@ export default function builds(program: Command) {
 				}
 				const buf = Buffer.from(await binaryRes.arrayBuffer());
 				const outDir = path.resolve(String(opts.out));
-				const fileName = opts.filename ? String(opts.filename) : `build-${buildId}.bin`;
+				const fileName = opts.filename
+					? String(opts.filename)
+					: resolveDownloadFilename(binaryRes.headers, url, `${buildId}.bin`);
 				await writeBinary(outDir, fileName, buf);
 				const fullPath = path.join(outDir, fileName);
 				spinner.succeed(`Saved: ${fullPath}`);

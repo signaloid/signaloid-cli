@@ -9,6 +9,7 @@ import { PlotResponse } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printError } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 /**
  * Registers the 'plot' command and subcommands for generating plots and visualizations.
@@ -61,7 +62,7 @@ export default function plot(program: Command) {
 				if (opts.outFile && !opts.uxString) {
 					printError("--out-file can only be used together with --ux-string");
 					spinner.fail("--out-file can only be used together with --ux-string");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				const plotId = res.plotID;

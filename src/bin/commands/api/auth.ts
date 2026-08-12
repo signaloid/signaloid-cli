@@ -9,6 +9,7 @@ import { handleCliError } from "../../utils/error-handler";
 import { displayResource, OutputFormat } from "../../utils/output";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printError, printInfo, printTip, printData } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 /**
  * Registers the 'auth' command and subcommands for authentication management.
@@ -108,7 +109,7 @@ export default function auth(program: Command) {
 					// Final validation just in case
 					if (!validateNonEmptyString(apiKey!)) {
 						spinner.fail("API key cannot be empty");
-						process.exit(2);
+						process.exit(EXIT_CODES.USAGE);
 					}
 
 					spinner.start("Authenticating...");
@@ -178,20 +179,20 @@ export default function auth(program: Command) {
 				// Final validation after prompts
 				if (!email) {
 					spinner.fail("Email is required");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 				if (!password) {
 					spinner.fail("Password is required");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				if (!validateEmail(email)) {
 					spinner.fail("Invalid email address");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 				if (!validateNonEmptyString(password)) {
 					spinner.fail("Password cannot be empty");
-					process.exit(2);
+					process.exit(EXIT_CODES.USAGE);
 				}
 
 				const loginCfg = {
@@ -258,7 +259,7 @@ export default function auth(program: Command) {
 				}
 				spinner.fail("Authentication failed");
 				printError(chalk.red(e?.message || String(e)));
-				process.exit(1);
+				process.exit(EXIT_CODES.ERROR);
 			}
 		});
 
@@ -299,7 +300,7 @@ export default function auth(program: Command) {
 			} catch (e: any) {
 				spinner.fail("Logout failed");
 				printError(chalk.red(e?.message || String(e)));
-				process.exit(1);
+				process.exit(EXIT_CODES.ERROR);
 			}
 		});
 }

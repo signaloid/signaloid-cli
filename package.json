@@ -1,6 +1,6 @@
 {
   "name": "@signaloid/signaloid-cli",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "",
   "main": "dist/bin/cli.js",
   "files": [
@@ -8,6 +8,9 @@
   ],
   "bin": {
     "signaloid-cli": "dist/bin/cli.js"
+  },
+  "engines": {
+    "node": ">=20.19.0"
   },
   "repository": {
     "type": "git",
@@ -26,7 +29,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@signaloid/scce-sdk": "^2.0.1",
+    "@signaloid/scce-sdk": "^2.2.0",
     "commander": "13.1.0",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",
@@ -36,8 +39,10 @@
     "ora": "8.0.1",
     "path": "0.12.7",
     "prettier": "3.6.2",
-    "table": "6.8.2",
-    "uuid": "11.1.0"
+    "table": "6.8.2"
+  },
+  "overrides": {
+    "minimatch": ">=10.2.1"
   },
   "devDependencies": {
     "@types/commander": "2.12.0",

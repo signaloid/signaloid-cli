@@ -78,8 +78,8 @@ export class GhStyleHelp extends Help {
 
 		// Command-specific options (not inherited)
 		const commandOptions = cmd.options.filter((opt) => {
-			// Filter out inherited options
-			return !(opt as any).inherited;
+			// Filter out inherited and hidden options
+			return !(opt as any).inherited && !(opt as any).hidden;
 		});
 
 		if (commandOptions.length > 0) {
