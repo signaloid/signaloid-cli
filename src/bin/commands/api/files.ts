@@ -17,6 +17,7 @@ import { FileItem } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import { EXIT_CODES } from "../../utils/exit-codes";
 
 /**
  * Registers the 'files' command and subcommands for managing files in cloud storage.
@@ -227,8 +228,12 @@ export default function files(program: Command) {
 			const p = String(opts.path);
 			const spinner = createSpinner("Deleting...");
 			try {
-				if (opts.recursive && opts.directory === undefined) {
-					opts.directory = true;
+				// --recursive used to imply --directory, so one flag did a recursive delete.
+				if (opts.recursive && !opts.directory) {
+					spinner.fail("Failed to delete");
+					printData("Use --directory with --recursive to delete a directory and its contents.");
+					process.exitCode = EXIT_CODES.USAGE;
+					return;
 				}
 
 				const client = makeClient(await loadConfig());

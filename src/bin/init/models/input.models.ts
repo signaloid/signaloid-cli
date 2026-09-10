@@ -1,4 +1,4 @@
-export type InputType = "text-input" | "basic-slider" | "distribution-slider" | "multiple-choice" | "text-input";
+export type InputType = "text-input" | "basic-slider" | "distribution-slider" | "multiple-choice" | "file";
 
 export interface BaseInputConfig {
 	id: string;
@@ -29,11 +29,19 @@ export interface MultipleChoiceConfig extends BaseInputConfig {
 	initialValue: string;
 	options: { name: string; value: string }[];
 }
-export type InputConfig = TextInputConfig | SliderConfig | MultipleChoiceConfig;
+
+export interface FileInputConfig extends BaseInputConfig {
+	type: "file";
+	accept: string;
+	destination: string;
+}
+
+export type InputConfig = TextInputConfig | SliderConfig | MultipleChoiceConfig | FileInputConfig;
 
 export const inputTypeMap: { [key in InputType]: string } = {
 	["text-input"]: "Number input field",
 	["basic-slider"]: "Basic slider",
 	["distribution-slider"]: "Distribution slider",
 	["multiple-choice"]: "Multiple choice",
+	["file"]: "File upload",
 };

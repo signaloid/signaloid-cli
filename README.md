@@ -306,7 +306,7 @@ signaloid-cli builds tasks --build-id <id> [--from <iso>] [--to <iso>] [--start-
 
 #### `builds binary`
 
-Get the download URL for the compiled build binary, or download the binary directly with `--out`. Only available for `C0-microSD` and `C0-microSD-plus` core class builds.
+Get the download URL for the compiled build binary, or download the binary directly with `--out`. Only available for `C0-microSD`, `C0-microSD-plus`, and `C0-SD` core class builds.
 
 ```
 signaloid-cli builds binary --build-id <id> [--out <dir>] [--filename <name>] [--url-only]
@@ -465,7 +465,7 @@ signaloid-cli cores create --name <name> --class <class> --precision <n> --memor
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Core name |
-| `--class <class>` | Core class: `C0` \| `C0Pro` \| `C0-microSD` \| `C0-microSD-plus` |
+| `--class <class>` | Core class: `C0` \| `C0Pro` \| `C0-microSD` \| `C0-microSD-plus` \| `C0-SD` |
 | `--precision <n>` | Precision (integer) |
 | `--memory <n>` | Memory size in bytes (integer) |
 | `--microarchitecture <arch>` | `Athens` \| `Atlas` \| `Bypass` \| `Reference` \| `Jupiter` |
