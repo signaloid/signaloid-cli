@@ -30,7 +30,12 @@ export async function promptForApplicationDetails(): Promise<DemoApplicationDeta
 			message: "Enter Signaloid Core ID:",
 			default: "cor_b852539c8ffd5a40a2688a0b29e344b5",
 		},
-		{ type: "input", name: "commit", message: "Enter the commit hash or branch to build:", default: "HEAD" },
+		{
+			type: "input",
+			name: "commit",
+			message: "Enter the commit hash to build, or HEAD to track the branch:",
+			default: "HEAD",
+		},
 		{ type: "input", name: "branch", message: "Enter the branch name:", default: "main" },
 		{ type: "input", name: "buildDirectory", message: "Enter the build directory:", default: "src" },
 		{

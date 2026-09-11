@@ -32,7 +32,29 @@ export async function customizeTemplate(destinationPath: string, projectName: st
 		console.warn(`   - ⚠️ Could not update package.json. You may need to do it manually. Reason: ${message}`);
 	}
 
-	// --- 2. Remove the .git folder to allow for a fresh start ---
+	// --- 2. Keep the auth files this CLI may write out of the user's git history ---
+	// The npm registry retry writes a .npmrc holding a plaintext GitHub token
+	// into this directory, and we tell the user to run "git init" below.
+	const gitignorePath = path.join(destinationPath, ".gitignore");
+	try {
+		let gitignore = await fs.readFile(gitignorePath, "utf-8").catch(() => "");
+		const missing = [".npmrc", ".netrc"].filter(
+			(entry) => !gitignore.split("\n").some((line) => line.trim() === entry),
+		);
+		if (missing.length > 0) {
+			if (gitignore.length > 0 && !gitignore.endsWith("\n")) {
+				gitignore += "\n";
+			}
+			gitignore += `\n# Credentials written by the Signaloid CLI\n${missing.join("\n")}\n`;
+			await fs.writeFile(gitignorePath, gitignore);
+			console.log(`   - \u2714 Added ${missing.join(", ")} to .gitignore`);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.warn(`   - \u26a0\ufe0f Could not update .gitignore. Reason: ${message}`);
+	}
+
+	// --- 3. Remove the .git folder to allow for a fresh start ---
 	const gitFolderPath = path.join(destinationPath, ".git");
 	try {
 		await fs.rm(gitFolderPath, { recursive: true, force: true });

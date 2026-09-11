@@ -1,4 +1,5 @@
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
+import type { CoreRequest } from "@signaloid/scce-sdk";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
@@ -13,6 +14,13 @@ import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
 import { EXIT_CODES } from "../../utils/exit-codes";
+
+function wholeNumber(value: string): number {
+	if (!/^-?\d+$/.test(value.trim())) {
+		throw new InvalidArgumentError("must be a whole number");
+	}
+	return Number(value);
+}
 
 /**
  * Registers the 'cores' command and subcommands for managing Signaloid computation cores.
@@ -141,9 +149,9 @@ export default function cores(program: Command) {
 	cmd.command("create")
 		.description("Create a new custom core configuration")
 		.requiredOption("--name <str>", "Name")
-		.requiredOption("--class <C0|C0Pro|C0-microSD|C0-microSD-plus>", "Core class")
-		.requiredOption("--precision <n>", "Precision (number)", (v) => parseInt(v, 10))
-		.requiredOption("--memory <n>", "Memory size (number)", (v) => parseInt(v, 10))
+		.requiredOption("--class <C0|C0Pro|C0-microSD|C0-microSD-plus|C0-SD>", "Core class")
+		.requiredOption("--precision <n>", "Precision (number)", wholeNumber)
+		.requiredOption("--memory <n>", "Memory size (number)", wholeNumber)
 		.option("--microarchitecture <Athens|Atlas|Bypass|Reference|Jupiter>", "Microarchitecture")
 		.option("--correlation-tracking <Autocorrelation|Disable>", "Correlation tracking")
 		.action(async (opts) => {
@@ -151,15 +159,7 @@ export default function cores(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				// CoreRequest uses CAPITALIZED keys per your types
-				const payload: {
-					Name: string;
-					Class: "C0" | "C0Pro" | "C0-microSD" | "C0-microSD-plus";
-					Precision: number;
-					MemorySize: number;
-					Microarchitecture: "Athens" | "Atlas" | "Bypass" | "Reference" | "Jupiter";
-					CorrelationTracking: "Autocorrelation" | "Disable";
-				} = {
+				const payload: CoreRequest = {
 					Name: opts.name,
 					Class: opts.class,
 					Precision: opts.precision,
@@ -182,9 +182,9 @@ export default function cores(program: Command) {
 		.description("Update an existing core configuration")
 		.requiredOption("--core-id <id>", "Core ID")
 		.option("--name <str>", "New name")
-		.option("--class <C0|C0Pro|C0-microSD|C0-microSD-plus>", "New class")
-		.option("--precision <n>", "New precision (number)", (v) => parseInt(v, 10))
-		.option("--memory <n>", "New memory size (number)", (v) => parseInt(v, 10))
+		.option("--class <C0|C0Pro|C0-microSD|C0-microSD-plus|C0-SD>", "New class")
+		.option("--precision <n>", "New precision (number)", wholeNumber)
+		.option("--memory <n>", "New memory size (number)", wholeNumber)
 		.option("--microarchitecture <Athens|Atlas|Bypass|Reference|Jupiter>", "New microarchitecture")
 		.option("--correlation-tracking <Autocorrelation|Disable>", "New correlation tracking")
 		.action(async (opts) => {

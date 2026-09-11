@@ -1,8 +1,42 @@
 import inquirer from "inquirer";
-import { InputType, inputTypeMap, MultipleChoiceConfig, SliderConfig, TextInputConfig } from "../models/input.models";
+import {
+	FileInputConfig,
+	InputConfig,
+	InputType,
+	inputTypeMap,
+	MultipleChoiceConfig,
+	SliderConfig,
+	TextInputConfig,
+} from "../models/input.models";
 
-// A union type that can be any of our defined input configurations
-export type InputConfig = TextInputConfig | SliderConfig | MultipleChoiceConfig;
+export type { InputConfig };
+
+export function validateAcceptPatterns(value: string): true | string {
+	const patterns = value
+		.split(",")
+		.map((pattern) => pattern.trim())
+		.filter(Boolean);
+	const malformed = patterns.filter((pattern) => !pattern.startsWith(".") && !pattern.includes("/"));
+	if (malformed.length > 0) {
+		return `Use '.${malformed[0]}' for an extension, or a MIME type such as 'text/${malformed[0]}'.`;
+	}
+	return true;
+}
+
+export function normalizeDestination(value: string): string {
+	return value.trim().replace(/^\/+|\/+$/g, "");
+}
+
+export function validateDestination(value: string): true | string {
+	const destination = normalizeDestination(value);
+	if (!destination) {
+		return "Destination cannot be empty.";
+	}
+	if (destination.split("/").includes("..")) {
+		return "Destination cannot contain '..'.";
+	}
+	return true;
+}
 
 /**
  * Prompts the user to configure a series of inputs for the application.
@@ -37,6 +71,7 @@ export async function promptForInputs(): Promise<InputConfig[]> {
 					{ name: "Distribution slider", value: "distribution-slider" },
 					{ name: "Text input", value: "text-input" },
 					{ name: "Multiple choice", value: "multiple-choice" },
+					{ name: "File upload", value: "file" },
 				],
 			},
 		]);
@@ -126,9 +161,10 @@ export async function promptForInputs(): Promise<InputConfig[]> {
 					type: "number",
 					name: "numberOfOptions",
 					message: "How many options do you want to add?",
+					default: 2,
 					validate: (value) => {
-						if (value && value < 1) {
-							return "Please enter a number greater than 0";
+						if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+							return "Please enter a whole number greater than 0";
 						}
 						return true;
 					},
@@ -172,10 +208,39 @@ export async function promptForInputs(): Promise<InputConfig[]> {
 				name: commonDetails.name,
 				type: inputType,
 				initialValue: options[0].value,
-				argumentFlag: commonDetails.argumentFlag,
+				argumentFlag: ` ${commonDetails.argumentFlag.trim()} `,
 				options: options,
 			};
 			inputs.push(multipleChoiceObject);
+		} else if (inputType === "file") {
+			const fileDetails = await inquirer.prompt([
+				{
+					type: "input",
+					name: "accept",
+					message: "Accepted file types, e.g. '.csv' or 'text/csv' (blank for any):",
+					default: "",
+					filter: (value: string) => value.trim(),
+					validate: validateAcceptPatterns,
+				},
+				{
+					type: "input",
+					name: "destination",
+					message: "Upload destination under the user's cloud storage:",
+					default: "demo-inputs",
+					filter: normalizeDestination,
+					validate: validateDestination,
+				},
+			]);
+
+			const fileInput: FileInputConfig = {
+				id,
+				name: commonDetails.name,
+				argumentFlag: ` ${commonDetails.argumentFlag.trim()} `,
+				type: "file",
+				accept: fileDetails.accept,
+				destination: fileDetails.destination,
+			};
+			inputs.push(fileInput);
 		}
 	}
 

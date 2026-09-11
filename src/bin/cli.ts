@@ -4,6 +4,7 @@ EventEmitter.defaultMaxListeners = 20;
 
 import { Command } from "commander";
 import chalk from "chalk";
+import { EXIT_CODES } from "./utils/exit-codes";
 
 // Code generation
 import createInit from "./commands/init";
@@ -52,7 +53,6 @@ Use ${chalk.cyan("signaloid-cli <command> --help")} for more information about a
 
 Read the manual at ${chalk.underline("https://docs.signaloid.io/docs/api/signaloid-cli/intro")}
 `;
-
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
 	setVerbosity(parseInt(program.opts().verbosity ?? "2", 10));
@@ -110,4 +110,10 @@ program.commands.forEach((cmd) => {
 	}
 });
 
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error: any) => {
+	if (error?.name === "ExitPromptError") {
+		process.exit(EXIT_CODES.SUCCESS);
+	}
+	console.error(chalk.red(error?.stderr || error?.shortMessage || error?.message || String(error)));
+	process.exit(EXIT_CODES.ERROR);
+});
