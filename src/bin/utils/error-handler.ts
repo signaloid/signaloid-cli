@@ -58,6 +58,11 @@ export async function withErrorHandlingCustom<T>(
 	}
 }
 
+/** The HTTP status carried by an SDK or axios error, if the API answered at all. */
+export function httpStatusOf(e: any): number | undefined {
+	return e?.status ?? e?.response?.status ?? e?.details?.response?.status;
+}
+
 export async function handleCliError(e: any, context?: string): Promise<never> {
 	let cfg: any = null;
 	try {
@@ -68,7 +73,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 
 	const code = e.code ?? e.details?.code;
 
-	const status = e.status ?? e.response?.status ?? e.details?.response?.status;
+	const status = httpStatusOf(e);
 
 	const msg = e.message || e.details || e.details?.message || "An error occurred";
 

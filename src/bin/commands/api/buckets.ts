@@ -32,6 +32,7 @@ import { printData } from "../../utils/verbosity";
  * signaloid-cli buckets list
  * signaloid-cli buckets create --name my-bucket --account acc-123 --region us-east-1
  * signaloid-cli buckets update --bucket-id bucket-456 --read --write
+ * signaloid-cli buckets update --bucket-id bucket-456 --no-write
  * ```
  */
 export default function buckets(program: Command) {
@@ -143,7 +144,9 @@ export default function buckets(program: Command) {
 		.option("--account <account>", "Account identifier (Account)")
 		.option("--mount-path <path>", "Mount path (MountPath)")
 		.option("--read", "Enable read access (Read)")
+		.option("--no-read", "Disable read access (Read)")
 		.option("--write", "Enable write access (Write)")
+		.option("--no-write", "Disable write access (Write)")
 		.action(async (opts) => {
 			const bucketId = String(opts.bucketId);
 			const spinner = createSpinner("Updating bucket...");

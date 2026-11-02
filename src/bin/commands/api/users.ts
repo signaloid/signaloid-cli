@@ -1,4 +1,5 @@
 import { Command, InvalidArgumentError, Option } from "commander";
+import type { UserPatchRemovableField } from "@signaloid/scce-sdk";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
@@ -7,6 +8,15 @@ import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { OutputFormat, displayResource } from "../../utils/output";
 import { printData } from "../../utils/verbosity";
+
+const REMOVABLE_FIELDS: readonly UserPatchRemovableField[] = ["Editor_Execution_DataSources", "Editor_Execution_Core"];
+
+function removableField(value: string, previous: UserPatchRemovableField[]): UserPatchRemovableField[] {
+	if (!REMOVABLE_FIELDS.includes(value as UserPatchRemovableField)) {
+		throw new InvalidArgumentError(`must be one of ${REMOVABLE_FIELDS.join(", ")}`);
+	}
+	return [...previous, value as UserPatchRemovableField];
+}
 
 function toEpochMs(iso?: string): number | undefined {
 	if (!iso) return undefined;
@@ -113,7 +123,12 @@ export default function users(program: Command) {
 	cmd.command("update")
 		.description("Update current user profile and preferences")
 		.option("--pref <key=value>", "Set a preference (repeatable)", (v: string, prev: string[]) => (prev ? [...prev, v] : [v]), [] as string[])
-		.option("--remove <field>", "Remove a preference field (repeatable, allowed: Editor_Execution_DataSources, Editor_Execution_Core)", (v: string, prev: string[]) => (prev ? [...prev, v] : [v]), [] as string[])
+		.option(
+			"--remove <field>",
+			`Remove a preference field (repeatable, allowed: ${REMOVABLE_FIELDS.join(", ")})`,
+			removableField,
+			[] as UserPatchRemovableField[],
+		)
 		.addOption(new Option("--role <role>", "Set your role").conflicts("clearRole"))
 		.addOption(new Option("--industry <industry>", "Set your industry").conflicts("clearIndustry"))
 		.addOption(new Option("--clear-role", "Clear your role"))
@@ -166,7 +181,7 @@ export default function users(program: Command) {
 				if (opts.industry !== undefined || opts.clearIndustry) {
 					patch.Industry = opts.clearIndustry ? null : opts.industry;
 				}
-				const removeFields = (opts.remove as string[]) || [];
+				const removeFields = opts.remove as UserPatchRemovableField[];
 				const res =
 					removeFields.length > 0
 						? await client.users.update(userID, patch as any, { remove: removeFields })

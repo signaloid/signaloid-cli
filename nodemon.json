@@ -2,5 +2,5 @@
   "watch": ["src"],
   "ext": "ts",
   "ignore": ["src/**/*.spec.ts"],
-  "exec": "tsc"
+  "exec": "tsc -p tsconfig.build.json"
 }

@@ -83,8 +83,13 @@ export default function auth(program: Command) {
 
 					let apiKey: string | undefined;
 
-					if (typeof apiKeyOpt === "string" && validateNonEmptyString(apiKeyOpt)) {
-						// --api-key <key>
+					if (typeof apiKeyOpt === "string") {
+						// --api-key <key>. An explicitly empty value (--api-key "") is a usage
+						// error; only --api-key without a value (commander gives `true`) prompts.
+						if (!validateNonEmptyString(apiKeyOpt)) {
+							printError("API key cannot be empty");
+							process.exit(EXIT_CODES.USAGE);
+						}
 						apiKey = apiKeyOpt;
 					} else {
 						// --api-key (no value) OR chosen from menu -> prompt for it, masked
@@ -114,10 +119,11 @@ export default function auth(program: Command) {
 
 					spinner.start("Authenticating...");
 
-					cfg.auth = { mode: "apikey", apiKey: apiKey! };
-					await saveConfig(cfg);
-					const client = makeClient(cfg);
+					// Verify the key before storing it, so a rejected key is never persisted.
+					const candidateCfg = { ...cfg, auth: { mode: "apikey" as const, apiKey: apiKey! } };
+					const client = makeClient(candidateCfg);
 					await client.users.me(); // verify key
+					await saveConfig(candidateCfg);
 
 					spinner.succeed("API key authenticated");
 					printInfo("Hello!");

@@ -17,7 +17,7 @@ import { FileItem } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
-import { EXIT_CODES } from "../../utils/exit-codes";
+import { usageError } from "../../utils/exit-codes";
 
 /**
  * Registers the 'files' command and subcommands for managing files in cloud storage.
@@ -71,11 +71,14 @@ export default function files(program: Command) {
 				const targetCount = opts.count;
 
 				const result = await fetchWithPagination(
+					// The files API calls the page cursor nextContinuationToken.
 					(startKey) =>
-						client.files.list({
-							path: opts.path,
-							startKey: startKey || opts.startKey,
-						}),
+						client.files
+							.list({
+								path: opts.path,
+								startKey: startKey || opts.startKey,
+							})
+							.then((page) => ({ ...page, ContinuationKey: page.nextContinuationToken })),
 					"items",
 					targetCount,
 					spinner,
@@ -176,6 +179,10 @@ export default function files(program: Command) {
 		.option("--from <localFile>", "Local file to upload")
 		.option("--text <string>", "Inline text content to upload")
 		.action(async (opts) => {
+			if (opts.from !== undefined && opts.text !== undefined) {
+				return usageError("Use either --from or --text, not both.");
+			}
+
 			const spinner = createSpinner("Uploading...");
 			try {
 				if (!opts.from && !opts.text) {
@@ -231,9 +238,7 @@ export default function files(program: Command) {
 				// --recursive used to imply --directory, so one flag did a recursive delete.
 				if (opts.recursive && !opts.directory) {
 					spinner.fail("Failed to delete");
-					printData("Use --directory with --recursive to delete a directory and its contents.");
-					process.exitCode = EXIT_CODES.USAGE;
-					return;
+					return usageError("Use --directory with --recursive to delete a directory and its contents.");
 				}
 
 				const client = makeClient(await loadConfig());

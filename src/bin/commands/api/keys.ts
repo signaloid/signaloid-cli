@@ -16,8 +16,19 @@ import { parseDuration } from "../../utils/time";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData, printError, printInfo } from "../../utils/verbosity";
-import { EXIT_CODES } from "../../utils/exit-codes";
+import { EXIT_CODES, usageError } from "../../utils/exit-codes";
 import inquirer from "inquirer";
+
+/**
+ * Extracts the KeyID from a full API key.
+ *
+ * Keys look like scce_<KeyID: 32 hex><payload: 32 hex>_<CRC32 checksum in hex>,
+ * and the KeyID is the publishable part. Returns undefined for a malformed key.
+ */
+export function keyIdFromApiKey(apiKey: string): string | undefined {
+	const match = /^scce_([0-9a-f]{32})[0-9a-f]{32}_[0-9a-f]{1,8}$/i.exec(apiKey.trim());
+	return match ? match[1] : undefined;
+}
 
 /**
  * Registers the 'keys' command and subcommands for managing API keys.
@@ -149,20 +160,30 @@ export default function keys(program: Command) {
 		.option("--api-key <key>", "API key")
 		.action(async (opts) => {
 			if (opts.keyId && opts.apiKey) {
-				printError("Use either --key-id or --api-key, not both.");
-				process.exitCode = EXIT_CODES.USAGE;
-				return;
+				return usageError("Use either --key-id or --api-key, not both.");
 			}
 
-			const client = makeClient(await loadConfig());
-			let keyId: string;
-
+			let keyId: string | undefined;
 			if (opts.keyId) {
 				keyId = String(opts.keyId);
 			} else if (opts.apiKey) {
-				const raw = String(opts.apiKey);
-				keyId = raw.startsWith("scce_") ? raw.slice("scce_".length) : raw;
-			} else {
+				keyId = keyIdFromApiKey(String(opts.apiKey));
+				if (!keyId) {
+					return usageError(
+						"Invalid API key format. Expected scce_<KeyID><payload>_<checksum>; use --key-id <id> instead.",
+					);
+				}
+			}
+
+			let client: ReturnType<typeof makeClient>;
+			try {
+				client = makeClient(await loadConfig());
+			} catch (e: any) {
+				await handleCliError(e);
+				return;
+			}
+
+			if (!keyId) {
 				// Interactive flow: fetch all keys and let the user pick one.
 				const fetchSpinner = createSpinner("Fetching API keys...");
 				let keys: any[] = [];

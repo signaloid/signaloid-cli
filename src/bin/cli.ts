@@ -24,6 +24,7 @@ import cores from "./commands/api/cores";
 import drives from "./commands/api/drives";
 import plot from "./commands/api/plot";
 import samples from "./commands/api/samples";
+import subscriptions from "./commands/api/subscriptions";
 import users from "./commands/api/users";
 import webhooks from "./commands/api/webhooks";
 import github from "./commands/api/github";
@@ -54,6 +55,7 @@ Use ${chalk.cyan("signaloid-cli <command> --help")} for more information about a
 Read the manual at ${chalk.underline("https://docs.signaloid.io/docs/api/signaloid-cli/intro")}
 `;
 
+
 program.hook("preAction", (_thisCommand, actionCommand) => {
 	setVerbosity(parseInt(program.opts().verbosity ?? "2", 10));
 	if (program.opts().json) {
@@ -76,6 +78,7 @@ organizations(program);
 plot(program);
 repos(program);
 samples(program);
+subscriptions(program);
 tasks(program);
 users(program);
 webhooks(program);
@@ -111,6 +114,8 @@ program.commands.forEach((cmd) => {
 });
 
 program.parseAsync(process.argv).catch((error: any) => {
+	// Anything a command failed to handle lands here. Print a message, not a
+	// Node stack trace.
 	if (error?.name === "ExitPromptError") {
 		process.exit(EXIT_CODES.SUCCESS);
 	}
