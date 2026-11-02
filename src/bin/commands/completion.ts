@@ -78,7 +78,7 @@ _signaloid_cli_completion() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="init auth health builds tasks buckets files repos keys cores drives plot samples users webhooks github completion help"
+    local commands="init auth health builds tasks buckets files repos keys cores drives plot samples subscriptions users webhooks github completion help"
     local global_opts="--help --version --debug --json --verbosity"
 
     # Subcommands for each command
@@ -94,6 +94,7 @@ _signaloid_cli_completion() {
     local samples_cmds="from-value-id from-ux-string"
     local plot_cmds="ux-string value-id"
     local webhooks_cmds="list create delete"
+    local subscriptions_cmds="get"
     local users_cmds="me update logs logout-all"
     local github_cmds="login logout status"
     local init_cmds="web-app"
@@ -135,6 +136,9 @@ _signaloid_cli_completion() {
             ;;
         webhooks)
             COMPREPLY=( \$(compgen -W "\$webhooks_cmds \$global_opts" -- "\$cur") )
+            ;;
+        subscriptions)
+            COMPREPLY=( \$(compgen -W "\$subscriptions_cmds \$global_opts" -- "\$cur") )
             ;;
         users)
             COMPREPLY=( \$(compgen -W "\$users_cmds \$global_opts" -- "\$cur") )
@@ -185,6 +189,7 @@ _signaloid_cli() {
         'drives:Manage virtual drives and data sources'
         'plot:Generate plots and visualizations from data'
         'samples:Retrieve statistical samples from task outputs'
+        'subscriptions:View account subscriptions'
         'users:View and manage user account information'
         'webhooks:Configure webhooks for event notifications'
         'github:Connect and manage GitHub integration'
@@ -329,6 +334,7 @@ complete -c signaloid-cli -f -n '__fish_use_subcommand' -a cores -d 'Manage comp
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a drives -d 'Manage virtual drives and data sources'
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a plot -d 'Generate plots and visualizations'
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a samples -d 'Retrieve statistical samples'
+complete -c signaloid-cli -f -n '__fish_use_subcommand' -a subscriptions -d 'View account subscriptions'
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a users -d 'View and manage user information'
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a webhooks -d 'Configure webhooks for events'
 complete -c signaloid-cli -f -n '__fish_use_subcommand' -a github -d 'Connect and manage GitHub integration'

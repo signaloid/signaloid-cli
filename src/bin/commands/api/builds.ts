@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import type { CreateSourceBuildRequest } from "@signaloid/scce-sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -19,6 +19,7 @@ import {
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import { usageError } from "../../utils/exit-codes";
 
 const TERMINAL_BUILD_STATES = new Set(["completed", "cancelled", "stopped"]);
 
@@ -137,14 +138,14 @@ export default function builds(program: Command) {
 		.option("--core-id <coreId>", "Core ID")
 		.option(
 			"--trace-variables <json>",
-			'JSON array of TraceVariableRequest objects, e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
+			'JSON array of TraceVariableRequest objects (not on r7i cores), e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
 		)
 		.option(
 			"--data-sources <json>",
 			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
 		.option("--public", "Mark the build as publicly accessible")
-		.option("--discover-variables", "Request the build to discover traceable variables")
+		.option("--discover-variables", "Request the build to discover traceable variables (not on r7i cores)")
 		.option("--config-mk <path>", "Path to a config.mk file")
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating build (source code)...");
@@ -337,23 +338,23 @@ export default function builds(program: Command) {
 		.option("--core-id <coreId>", "Core ID")
 		.option(
 			"--discover-variables",
-			"Request the build to discover traceable variables",
+			"Request the build to discover traceable variables (not on r7i cores)",
 			false,
 		)
 		.addOption(
-			new (require("commander").Option)("--discover-vars", "Alias for --discover-variables").hideHelp(),
+			new Option("--discover-vars", "Alias for --discover-variables").hideHelp(),
 		)
 		.option(
 			"--trace-variables <json>",
-			'JSON array of TraceVariable objects, e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
+			'JSON array of TraceVariable objects (not on r7i cores), e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
 		)
 		.option(
 			"--data-sources <json>",
 			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
-		.addOption(new (require("commander").Option)("--public", "Mark the resulting build as public").conflicts("private"))
+		.addOption(new Option("--public", "Mark the resulting build as public").conflicts("private"))
 		.addOption(
-			new (require("commander").Option)("--private", "Mark the resulting build as private (default)").conflicts("public"),
+			new Option("--private", "Mark the resulting build as private (default)").conflicts("public"),
 		)
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating repository build...");
@@ -407,28 +408,22 @@ export default function builds(program: Command) {
 		.description("Update build properties")
 		.requiredOption("--build-id <id>", "Build ID")
 		.addOption(
-			new (require("commander").Option)("--visibility <value>", "Set build visibility").choices([
-				"public",
-				"private",
-			]),
+			new Option("--visibility <value>", "Set build visibility").choices(["public", "private"]),
 		)
-		.addOption(
-			new (require("commander").Option)("--public", "Make the build public").conflicts("private"),
-		)
-		.addOption(
-			new (require("commander").Option)("--private", "Make the build private (default)").conflicts("public"),
-		)
+		.addOption(new Option("--public", "Make the build public").conflicts(["private", "visibility"]))
+		.addOption(new Option("--private", "Make the build private").conflicts(["public", "visibility"]))
 		.action(async (opts) => {
 			const buildId = String(opts.buildId);
+			let isPublic: boolean;
+			if (opts.visibility === "public") isPublic = true;
+			else if (opts.visibility === "private") isPublic = false;
+			else if (opts.public) isPublic = true;
+			else if (opts.private) isPublic = false;
+			else return usageError("Provide --visibility <public|private>, --public, or --private.");
 			const spinner = createSpinner("Updating build...");
 			try {
 				const client = makeClient(await loadConfig());
-				const payload: { IsPublic?: boolean } = {};
-				if (opts.visibility === "public") payload.IsPublic = true;
-				else if (opts.visibility === "private") payload.IsPublic = false;
-				else if (opts.public) payload.IsPublic = true;
-				else if (opts.private) payload.IsPublic = false;
-				const res = await client.builds.updateOne(buildId, payload);
+				const res = await client.builds.updateOne(buildId, { IsPublic: isPublic });
 				spinner.succeed("Build updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {

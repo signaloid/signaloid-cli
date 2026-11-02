@@ -1,19 +1,24 @@
 import chalk from "chalk";
-import { config } from "../../config/env.config";
+import { httpStatusOf } from "./error-handler";
+import { makeClient } from "./sdk";
 import { printError } from "./verbosity";
 
+/**
+ * Checks an API key by calling GET /users/me with it.
+ *
+ * The request goes through the SDK client, so it targets the same API endpoint
+ * as every other command (including an API_ENDPOINT override).
+ */
 export async function validateApiKey(apiKey: string): Promise<boolean> {
-	const validationUrl = `${config.API_URL}/users/me`;
 	try {
-		const response = await fetch(validationUrl, {
-			method: "GET",
-			headers: {
-				Authorization: `${apiKey}`,
-				"Content-Type": "application/json",
-			},
-		});
-		return response.ok;
-	} catch (error) {
+		const client = makeClient({ auth: { mode: "apikey", apiKey } });
+		await client.users.me();
+		return true;
+	} catch (error: any) {
+		// The API answered (e.g., 401 or 403), so the key is not valid.
+		if (httpStatusOf(error) !== undefined) {
+			return false;
+		}
 		printError(chalk.red("\nError: Could not connect to the API server. Please check your network connection."));
 		return false;
 	}

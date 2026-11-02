@@ -21,6 +21,7 @@ The Signaloid CLI provides a comprehensive command-line interface for interactin
 ### User & Account Management
 
 - **users.ts** - User account management (profile info, updates, activity logs, session management)
+- **subscriptions.ts** - Subscription management (view plan details)
 
 ### Code & Repository Management
 
@@ -128,8 +129,39 @@ To add a new command:
 2. Follow the common pattern structure shown above
 3. Add comprehensive JSDoc documentation
 4. Export a default function that registers the command
-5. Import and register the command in `src/bin/index.ts`
-6. Add tests in a corresponding `.test.ts` file
+5. Import and register the command in `src/bin/cli.ts`
+6. Add it to the bash, zsh and fish scripts in `../completion.ts`
+7. Add tests in a corresponding `.test.ts` file
+
+## Table Output and Columns
+
+Commands print JSON by default; `--format table` renders a table instead. In table mode,
+list commands also accept `--columns`:
+
+```
+signaloid-cli builds list --format table --columns help          # available columns and defaults
+signaloid-cli builds list --format table --columns id,status,created
+```
+
+Columns are defined per resource in `../../utils/output.ts`:
+
+- `AVAILABLE_COLUMNS[resource]` maps a column name (what users pass to `--columns`) to a
+  `ColumnConfig`: `key` is the field in the API response (dot paths such as
+  `Application.Type` reach nested fields), `header` is the table heading, and the optional
+  `formatter(value, row)` renders the cell.
+- `DEFAULT_COLUMNS[resource]` lists the columns shown when `--columns` is not given.
+- Unknown column names are skipped silently; missing values render as `N/A`.
+
+To add a column, find the field name with `--format json`, add an entry to
+`AVAILABLE_COLUMNS` (with a `formatter` if the raw value needs formatting) and, if it
+should show by default, to `DEFAULT_COLUMNS`. Some column names get built-in formatting in
+`createCustomTable` (`status`, dates such as `created`/`updated`, `size`, booleans such as
+`read`/`write`, and the computed `duration`); prefer a `formatter` for new columns.
+
+To support columns in a new resource, add both entries, then in the command's `list`
+action call `showAvailableColumns(resource)` for `--columns help` and
+`createCustomTable(resource, items, parseColumns(opts.columns))` for table output, as
+`buckets.ts` does.
 
 ## Testing
 

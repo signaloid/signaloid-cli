@@ -1,6 +1,6 @@
 {
   "name": "@signaloid/signaloid-cli",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "",
   "main": "dist/bin/cli.js",
   "files": [
@@ -21,15 +21,20 @@
   },
   "scripts": {
     "set:config:production": "dotenv -e environments/.env.production node ./scripts/generate-env.js",
-    "build:watch": "tsc --watch",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
     "copy:assets": "node scripts/copy-assets.js",
-    "build": "tsc && npm run copy:assets",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy:assets",
+    "build:production": "dotenv -e environments/.env.production npm run build",
+    "start:production": "dotenv -e environments/.env.production node dist/bin/cli.js",
+    "generate": "node dist/bin/cli.js",
     "cli": "node dist/bin/cli.js",
     "format:all": "prettier --write src/**/*",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "npm run set:config:production && npm run build:production"
   },
   "dependencies": {
-    "@signaloid/scce-sdk": "^2.2.0",
+    "@signaloid/scce-sdk": "4.0.0",
     "commander": "13.1.0",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",

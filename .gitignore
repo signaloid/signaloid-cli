@@ -10,3 +10,7 @@ dist
 .npmrc
 .netrc
 .gitconfig*
+*.c
+
+# local act secrets
+.secrets

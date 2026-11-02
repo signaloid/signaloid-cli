@@ -31,6 +31,7 @@ For information on these features, see the [Signaloid CLI developer documentatio
   - [plot](#plot)
   - [repos](#repos)
   - [samples](#samples)
+  - [subscriptions](#subscriptions)
   - [tasks](#tasks)
   - [users](#users)
   - [webhooks](#webhooks)
@@ -195,10 +196,10 @@ signaloid-cli builds create:source --file <path> --lang <lang> [--args <args>] [
 | `--lang <lang>` | Source language: `C` \| `C++` \| `Fortran` |
 | `--args <args>` | Default runtime arguments |
 | `--core-id <id>` | Core ID to use for the build |
-| `--trace-variables <json>` | JSON array of `TraceVariableRequest` objects, e.g. `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
+| `--trace-variables <json>` | Not supported on `r7i` cores. JSON array of `TraceVariableRequest` objects, e.g., `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
 | `--data-sources <json>` | JSON array of `DataSource` objects, e.g. `'[{"Location":"/data","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
 | `--public` | Mark the build as publicly accessible (sets `IsPublic=true`) |
-| `--discover-variables` | Request SCCE to discover traceable variables (sets `DiscoverVariables=true` query param) |
+| `--discover-variables` | Request SCCE to discover traceable variables (sets `DiscoverVariables=true` query param). Not supported on `r7i` cores. |
 | `--config-mk <path>` | Path to a `config.mk` file |
 
 #### `builds create:repo`
@@ -214,8 +215,8 @@ signaloid-cli builds create:repo --repo-id <id> [--args <args>] [--core-id <id>]
 | `--repo-id <id>` | Repository ID |
 | `--args <args>` | Default runtime arguments |
 | `--core-id <id>` | Core ID to use for the build |
-| `--discover-vars` | Request SCCE to discover output variables |
-| `--trace-variables <json>` | JSON array of `TraceVariable` objects, e.g. `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
+| `--discover-vars` | Request SCCE to discover output variables. Not supported on `r7i` cores. A build on an `r7i` core ignores the trace variables stored on the repository. |
+| `--trace-variables <json>` | Not supported on `r7i` cores. JSON array of `TraceVariable` objects, e.g., `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
 | `--data-sources <json>` | JSON array of `DataSource` objects, e.g. `'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
 | `--public` | Mark the resulting build as public |
 | `--private` | Mark the resulting build as private (default) |
@@ -390,7 +391,7 @@ signaloid-cli buckets create --name <name> --account <account> [--region <region
 Update information about the bucket. Only the specified options are updated; all others remain unchanged.
 
 ```
-signaloid-cli buckets update --bucket-id <id> [--name <name>] [--account <account>] [--region <region>] [--mount-path <path>] [--read] [--write]
+signaloid-cli buckets update --bucket-id <id> [--name <name>] [--account <account>] [--region <region>] [--mount-path <path>] [--read | --no-read] [--write | --no-write]
 ```
 
 #### `buckets delete`
@@ -459,24 +460,24 @@ signaloid-cli cores get --core-id <id> [--format <table|json>]
 Create a custom core in the SCCE.
 
 ```
-signaloid-cli cores create --name <name> --class <class> --precision <n> --memory <n> --microarchitecture <arch> --correlation-tracking <mode>
+signaloid-cli cores create --name <name> --class <class> [--precision <n>] [--memory <n>] --microarchitecture <arch> [--dependency-tracking <mode>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Core name |
-| `--class <class>` | Core class: `C0` \| `C0Pro` \| `C0-microSD` \| `C0-microSD-plus` \| `C0-SD` |
-| `--precision <n>` | Precision (integer) |
-| `--memory <n>` | Memory size in bytes (integer) |
-| `--microarchitecture <arch>` | `Athens` \| `Atlas` \| `Bypass` \| `Reference` \| `Jupiter` |
-| `--correlation-tracking <mode>` | `Autocorrelation` \| `Disable` |
+| `--class <class>` | Core class: `C0Pro` \| `r7i` \| `C0-microSD` \| `C0-microSD-plus` \| `C0-SD` |
+| `--precision <n>` | Precision (integer). Required except for the `r7i` class and the `Bypass` microarchitecture, whose precision is always `0`. Leave it out for them, or pass `0`. |
+| `--memory <n>` | Deprecated and optional. The server sets the memory size from the core class. |
+| `--microarchitecture <arch>` | `Athens` \| `Rome` \| `Bypass` \| `Reference` \| `Jupiter` \| `Native`. The `r7i` class takes only `Native`, and `Native` works with no other class. |
+| `--dependency-tracking <mode>` | `None` \| `Basic` \| `Advanced`. Required except for the `r7i` class and the `Bypass` microarchitecture, whose dependency tracking is always `None`. Leave it out for them, or pass `None`. |
 
 #### `cores update`
 
-Update information about the specified custom core. Only the specified options are updated; all others remain unchanged. Note that you cannot update properties of the default cores.
+Update information about the specified custom core. Only the specified options are updated. All others remain unchanged. Note that you cannot update properties of the default cores. A core that still has the retired `C0` class must be updated with `--class` (for example `C0Pro`, which replaced it), and one that still has the retired `Atlas` microarchitecture must be updated with `--microarchitecture` (for example `Rome`, which replaced it). Without `--dependency-tracking`, the stored mode is kept if the microarchitecture accepts it. An older core that has only the legacy correlation tracking is migrated: `Autocorrelation` becomes `Basic` and `Disable` becomes `None`. If the microarchitecture accepts only one mode (`Advanced` for `Jupiter`, `None` for `Bypass` and `Reference`), that mode is used instead. Otherwise, pass `--dependency-tracking`. Changing a core to `r7i` sets its microarchitecture to `Native` and drops its precision and dependency tracking (and refuses a `--microarchitecture` other than `Native`, a `--precision` other than `0`, or a `--dependency-tracking` other than `None`). Changing an `r7i` core to another class needs `--microarchitecture`. A `Bypass` core always has a precision of `0` and a dependency tracking of `None`, so changing a core to `Bypass` sets them, and `--precision` and `--dependency-tracking` must be left out or be `0` and `None`. Changing an `r7i` or `Bypass` core to a microarchitecture that takes a precision needs `--precision`.
 
 ```
-signaloid-cli cores update --core-id <id> [--name <name>] [--class <class>] [--precision <n>] [--memory <n>] [--microarchitecture <arch>] [--correlation-tracking <mode>]
+signaloid-cli cores update --core-id <id> [--name <name>] [--class <class>] [--precision <n>] [--memory <n>] [--microarchitecture <arch>] [--dependency-tracking <mode>]
 ```
 
 #### `cores delete`
@@ -1060,13 +1061,27 @@ signaloid-cli samples from-ux-string {--ux-string <ux> | --file <json>} [--count
 
 ---
 
+### subscriptions
+
+View subscription details and resource usage.
+
+#### `subscriptions get`
+
+```
+signaloid-cli subscriptions get [--format <table|json>]
+```
+
+[↑ Top](#signaloid-cli)
+
+---
+
 ### tasks
 
 Manage tasks (executions of builds). **Aliases:** `t`, `task`
 
 #### `tasks create`
 
-Run a new task from the specified build. Use `--public` to create a public task that can be accessed without authentication.
+Run a new task from the specified build. Use `--public` to create a public task that can be accessed without authentication. Builds for the `C0-microSD`, `C0-microSD-plus` and `C0-SD` classes cannot run as tasks. Download their binary with `builds binary` and run it on the matching Compute Module instead.
 
 ```
 signaloid-cli tasks create --build-id <id> [--args <str>] [--params-file <file>] [--param <k=v>]... [--public]
@@ -1196,15 +1211,19 @@ signaloid-cli users me [--format <table|json>]
 
 #### `users update`
 
-Update the current user's preferences. The API only supports updating preference fields.
+Update the current user's profile and preferences.
 
 ```
-signaloid-cli users update [--pref <key=value>]... [--payload-file <json>] [--format <table|json>]
+signaloid-cli users update [--pref <key=value>]... [--role <role>] [--industry <industry>] [--payload-file <json>] [--format <table|json>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--pref <key=value>` | Set a preference (repeatable). See allowed keys below. |
+| `--role <role>` | Set your role |
+| `--industry <industry>` | Set your industry |
+| `--clear-role` | Clear your role |
+| `--clear-industry` | Clear your industry |
 | `--payload-file <json>` | JSON file with a Preferences object to merge |
 | `--format <table\|json>` | Output format (default: `json`) |
 
@@ -1216,6 +1235,12 @@ signaloid-cli users update --pref Editor_Theme=dark
 
 # Update multiple preferences
 signaloid-cli users update --pref Editor_Theme=dark --pref Editor_Layout=horizontal
+
+# Set your role and industry
+signaloid-cli users update --role engineering --industry robotics
+
+# Clear your industry
+signaloid-cli users update --clear-industry
 ```
 
 #### `users logs`

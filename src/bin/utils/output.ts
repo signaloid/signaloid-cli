@@ -97,7 +97,13 @@ export const AVAILABLE_COLUMNS = {
 		precision: { key: "Precision", header: "Precision", width: 12 },
 		memory: { key: "MemorySize", header: "Memory", width: 12 },
 		microarch: { key: "Microarchitecture", header: "Microarch", width: 15 },
-		correlation: { key: "CorrelationTracking", header: "Correlation", width: 18 },
+		dependency: {
+			key: "DependencyTracking",
+			header: "Dependency",
+			width: 18,
+			// Older cores carry only the legacy CorrelationTracking that the API renamed.
+			formatter: (value: any, row: any) => String(value ?? row.CorrelationTracking ?? "N/A"),
+		},
 	},
 	repos: {
 		id: { key: "RepositoryID", header: "Repo ID", width: 30 },
@@ -373,8 +379,10 @@ export function createCustomTable(
 				value = item[colDef.key];
 			}
 
-			// Special formatters for specific column types
-			if (colKey === "status" && value) {
+			// Column-specific formatters first, then special formatters for specific column types
+			if (colDef.formatter) {
+				return colDef.formatter(value, item);
+			} else if (colKey === "status" && value) {
 				const statusColor = getStatusColor(value);
 				return chalk[statusColor](value || "Unknown");
 			} else if (colKey === "type" && value) {

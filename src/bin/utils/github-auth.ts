@@ -211,7 +211,9 @@ export async function checkGithubAuth(): Promise<boolean> {
 		return true;
 	}
 
-	console.log(chalk.yellow("npm cannot read the @signaloid package registry with your current npm configuration."));
+	console.log(
+		chalk.yellow("npm cannot read the @signaloid package registry with your current npm configuration."),
+	);
 	console.log(chalk.yellow("The project's dependencies will not install without a token."));
 
 	const token = await promptForToken();

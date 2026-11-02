@@ -1,5 +1,14 @@
-import { Command, InvalidArgumentError } from "commander";
-import type { CoreRequest } from "@signaloid/scce-sdk";
+import { Command, InvalidArgumentError, Option } from "commander";
+import type {
+	CoreClass,
+	CorePatchRequest,
+	CoreRequest,
+	DependencyTracking,
+	LegacyCorrelationTracking,
+	Microarchitecture,
+	NativeCoreClass,
+	NativeMicroarchitecture,
+} from "@signaloid/scce-sdk";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
@@ -13,7 +22,102 @@ import {
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
-import { EXIT_CODES } from "../../utils/exit-codes";
+import { EXIT_CODES, usageError } from "../../utils/exit-codes";
+
+// Keyed by the SDK types, so the compiler flags a class or mode the SDK adds and these lack.
+const CORE_CLASSES = Object.keys({
+	C0Pro: true,
+	r7i: true,
+	"C0-microSD": true,
+	"C0-microSD-plus": true,
+	"C0-SD": true,
+} satisfies Record<CoreClass, true>) as CoreClass[];
+const MICROARCHITECTURES = Object.keys({
+	Athens: true,
+	Rome: true,
+	Bypass: true,
+	Reference: true,
+	Jupiter: true,
+	Native: true,
+} satisfies Record<Microarchitecture, true>) as Microarchitecture[];
+const DEPENDENCY_TRACKING_MODES = Object.keys({
+	None: true,
+	Basic: true,
+	Advanced: true,
+} satisfies Record<DependencyTracking, true>) as DependencyTracking[];
+
+// Native-class cores have a fixed Precision of 0 and DependencyTracking of None, which the API fills in.
+const NATIVE_CORE_CLASS: NativeCoreClass = "r7i";
+const isNativeClass = (coreClass: string): boolean => coreClass === NATIVE_CORE_CLASS;
+// The only microarchitecture a native class takes, and it is valid with no other class.
+const NATIVE_MICROARCHITECTURE: NativeMicroarchitecture = "Native";
+// Native-class and Bypass cores have fixed fields, which the API fills in: Bypass ignores
+// Precision and tracks no dependencies.
+const BYPASS_MICROARCHITECTURE: Microarchitecture = "Bypass";
+const FIXED_PRECISION = 0;
+const FIXED_DEPENDENCY_TRACKING: DependencyTracking = "None";
+const hasFixedFields = (coreClass: string, microarchitecture: string): boolean =>
+	isNativeClass(coreClass) || microarchitecture === BYPASS_MICROARCHITECTURE;
+
+// Older cores carry only CorrelationTracking, which the API renamed to DependencyTracking.
+// Autocorrelation is the Basic mode of Athens and Rome, and Disable is None.
+const LEGACY_DEPENDENCY_TRACKING: Record<LegacyCorrelationTracking, DependencyTracking> = {
+	Autocorrelation: "Basic",
+	Disable: "None",
+};
+
+// The dependency tracking modes each microarchitecture accepts.
+const TRACKING_BY_MICROARCHITECTURE = {
+	Athens: ["None", "Basic"],
+	Rome: ["None", "Basic"],
+	Jupiter: ["Advanced"],
+	Bypass: ["None"],
+	Reference: ["None"],
+	Native: ["None"],
+} satisfies Record<Microarchitecture, DependencyTracking[]>;
+
+/** The usage error for a --precision or --dependency-tracking a core with fixed fields refuses, if any. */
+function fixedFieldsConflictError(
+	subject: string,
+	opts: { precision?: number; dependencyTracking?: string },
+): string | undefined {
+	const conflicts: string[] = [];
+	if (opts.precision !== undefined && opts.precision !== FIXED_PRECISION) conflicts.push("--precision");
+	if (opts.dependencyTracking !== undefined && opts.dependencyTracking !== FIXED_DEPENDENCY_TRACKING) {
+		conflicts.push("--dependency-tracking");
+	}
+	if (conflicts.length === 0) return undefined;
+	return `${subject} takes no ${conflicts.join(" or ")}: its precision is ${FIXED_PRECISION} and its dependency tracking is ${FIXED_DEPENDENCY_TRACKING}.`;
+}
+
+/**
+ * The usage error for options that do not suit the class, if any. A native class takes only the
+ * Native microarchitecture and fixed fields, and Native is valid with no other class.
+ */
+function nativeConflictError(
+	coreClass: string,
+	opts: { microarchitecture?: string; precision?: number; dependencyTracking?: string },
+): string | undefined {
+	if (!isNativeClass(coreClass)) {
+		return opts.microarchitecture === NATIVE_MICROARCHITECTURE
+			? `The ${NATIVE_MICROARCHITECTURE} microarchitecture works only with the ${NATIVE_CORE_CLASS} class.`
+			: undefined;
+	}
+	if (opts.microarchitecture !== undefined && opts.microarchitecture !== NATIVE_MICROARCHITECTURE) {
+		return `The ${coreClass} class takes only the ${NATIVE_MICROARCHITECTURE} microarchitecture.`;
+	}
+	return fixedFieldsConflictError(`The ${coreClass} class`, opts);
+}
+
+/** The usage error for options a Bypass core refuses, if any: it takes only fixed fields. */
+function bypassConflictError(
+	microarchitecture: string | undefined,
+	opts: { precision?: number; dependencyTracking?: string },
+): string | undefined {
+	return microarchitecture === BYPASS_MICROARCHITECTURE
+		? fixedFieldsConflictError(`The ${BYPASS_MICROARCHITECTURE} microarchitecture`, opts)
+		: undefined;
+}
 
 function wholeNumber(value: string): number {
 	if (!/^-?\d+$/.test(value.trim())) {
@@ -42,7 +146,7 @@ function wholeNumber(value: string): number {
  * ```
  * signaloid-cli cores list --default
  * signaloid-cli cores get --core-id core-123
- * signaloid-cli cores create --name MyCore --class C0 --precision 32 --memory 2048 --microarch Athens --corr Autocorrelation
+ * signaloid-cli cores create --name MyCore --class C0Pro --precision 32 --microarchitecture Athens --dependency-tracking Basic
  * signaloid-cli cores update --core-id core-123 --name UpdatedCore
  * ```
  */
@@ -145,28 +249,60 @@ export default function cores(program: Command) {
 			}
 		});
 
-	// signaloid-cli cores create --name MyCore --class C0 --precision 32 --memory 2048 --microarch Athens --corr Autocorrelation
+	// signaloid-cli cores create --name MyCore --class C0Pro --precision 32 --microarchitecture Athens --dependency-tracking Basic
 	cmd.command("create")
 		.description("Create a new custom core configuration")
 		.requiredOption("--name <str>", "Name")
-		.requiredOption("--class <C0|C0Pro|C0-microSD|C0-microSD-plus|C0-SD>", "Core class")
-		.requiredOption("--precision <n>", "Precision (number)", wholeNumber)
-		.requiredOption("--memory <n>", "Memory size (number)", wholeNumber)
-		.option("--microarchitecture <Athens|Atlas|Bypass|Reference|Jupiter>", "Microarchitecture")
-		.option("--correlation-tracking <Autocorrelation|Disable>", "Correlation tracking")
+		.addOption(new Option("--class <class>", "Core class").choices(CORE_CLASSES).makeOptionMandatory())
+		.option(
+			"--precision <n>",
+			"Precision (number, required except for the r7i class and the Bypass microarchitecture)",
+			wholeNumber,
+		)
+		.option("--memory <n>", "Memory size (deprecated: the server sets it from the core class)", wholeNumber)
+		.addOption(
+			new Option("--microarchitecture <arch>", "Microarchitecture")
+				.choices(MICROARCHITECTURES)
+				.makeOptionMandatory(),
+		)
+		.addOption(
+			new Option(
+				"--dependency-tracking <mode>",
+				"Dependency tracking (required except for the r7i class and the Bypass microarchitecture)",
+			).choices(DEPENDENCY_TRACKING_MODES),
+		)
 		.action(async (opts) => {
+			const conflict = nativeConflictError(opts.class, opts) ?? bypassConflictError(opts.microarchitecture, opts);
+			if (conflict) return usageError(conflict);
+			if (!isNativeClass(opts.class)) {
+				const missing: string[] = [];
+				if (!hasFixedFields(opts.class, opts.microarchitecture) && !Number.isFinite(opts.precision)) {
+					missing.push("--precision");
+				}
+				if (!hasFixedFields(opts.class, opts.microarchitecture) && opts.dependencyTracking === undefined) {
+					missing.push("--dependency-tracking");
+				}
+				if (missing.length > 0) {
+					const target = `the ${opts.class} class with ${opts.microarchitecture}`;
+					return usageError(
+						`${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} required for ${target}.`,
+					);
+				}
+			}
 			const spinner = createSpinner("Creating core...");
 			try {
 				const client = makeClient(await loadConfig());
 
-				const payload: CoreRequest = {
+				// The API checks which fields the class takes, so the cast only skips the union
+				// narrowing. Options left out stay undefined and are not sent.
+				const payload = {
 					Name: opts.name,
 					Class: opts.class,
 					Precision: opts.precision,
-					MemorySize: opts.memory,
 					Microarchitecture: opts.microarchitecture,
-					CorrelationTracking: opts.correlationTracking,
-				};
+					DependencyTracking: opts.dependencyTracking,
+				} as CoreRequest;
+				if (Number.isFinite(opts.memory)) payload.MemorySize = opts.memory;
 
 				const res = await client.cores.create(payload);
 				spinner.succeed("Core created");
@@ -177,41 +313,120 @@ export default function cores(program: Command) {
 			}
 		});
 
-	// signaloid-cli cores update --core-id <id> [--name ...] [--class ...] [--precision ...] [--memory ...] [--microarch ...] [--corr ...]
+	// signaloid-cli cores update --core-id <id> [--name ...] [--class ...] [--precision ...] [--memory ...] [--microarchitecture ...] [--dependency-tracking ...]
 	cmd.command("update")
 		.description("Update an existing core configuration")
 		.requiredOption("--core-id <id>", "Core ID")
 		.option("--name <str>", "New name")
-		.option("--class <C0|C0Pro|C0-microSD|C0-microSD-plus|C0-SD>", "New class")
-		.option("--precision <n>", "New precision (number)", wholeNumber)
-		.option("--memory <n>", "New memory size (number)", wholeNumber)
-		.option("--microarchitecture <Athens|Atlas|Bypass|Reference|Jupiter>", "New microarchitecture")
-		.option("--correlation-tracking <Autocorrelation|Disable>", "New correlation tracking")
+		.addOption(new Option("--class <class>", "New class").choices(CORE_CLASSES))
+		.option(
+			"--precision <n>",
+			"New precision (number, required to change an r7i or Bypass core to a microarchitecture that takes one)",
+			wholeNumber,
+		)
+		.option("--memory <n>", "New memory size (deprecated: the server sets it from the core class)", wholeNumber)
+		.addOption(
+			new Option(
+				"--microarchitecture <arch>",
+				"New microarchitecture (required to change an r7i core to another class; an r7i core takes only Native)",
+			).choices(MICROARCHITECTURES),
+		)
+		.addOption(
+			new Option("--dependency-tracking <mode>", "New dependency tracking").choices(DEPENDENCY_TRACKING_MODES),
+		)
 		.action(async (opts) => {
 			const id = String(opts.coreId);
+			// With --class, the arguments alone decide this, so check before fetching the core.
+			const conflict =
+				(opts.class !== undefined && nativeConflictError(opts.class, opts)) ||
+				bypassConflictError(opts.microarchitecture, opts);
+			if (conflict) return usageError(conflict);
 			const spinner = createSpinner("Updating core...");
+			const fail = (message: string) => {
+				spinner.fail("Failed to update core");
+				usageError(message);
+			};
 			try {
 				const client = makeClient(await loadConfig());
 
-				// SDK types make all fields required for CorePatchRequest, but server
-				// typically accepts partials; send only provided fields and cast.
+				// PATCH takes the full core body, so start from the stored core and
+				// override only the fields the user provided.
 				const core = await client.cores.getOne(id);
 
-				const patch = (({ Name, Class, Precision, MemorySize, Microarchitecture, CorrelationTracking }) => ({
-					Name,
-					Class,
-					Precision,
-					MemorySize,
-					Microarchitecture,
-					CorrelationTracking,
-				}))(core);
+				const coreClass = typeof opts.class === "string" ? opts.class : core.Class;
+				if (coreClass === "C0") {
+					return fail(
+						"Core class C0 is retired. Pass --class (e.g. C0Pro, which replaced it) to update this core.",
+					);
+				}
+				const toNative = isNativeClass(coreClass);
+				const fromNative = isNativeClass(core.Class);
+				if (core.Microarchitecture === "Atlas" && opts.microarchitecture === undefined && !toNative) {
+					return fail(
+						"Microarchitecture Atlas is retired. Pass --microarchitecture (e.g. Rome, which replaced it) to update this core.",
+					);
+				}
+
+				// Native is the only microarchitecture a native class takes.
+				const microarchitecture: string =
+					opts.microarchitecture ?? (toNative ? NATIVE_MICROARCHITECTURE : core.Microarchitecture);
+				// A native core's stored Native microarchitecture suits no other class, and the fixed
+				// Precision of 0 of a native or Bypass core suits no microarchitecture that takes one.
+				const toFixedFields = hasFixedFields(coreClass, microarchitecture);
+				const fromFixedFields = hasFixedFields(core.Class, core.Microarchitecture);
+				const missing: string[] = [];
+				if (fromNative && !toNative && opts.microarchitecture === undefined) {
+					missing.push("--microarchitecture");
+				}
+				if (fromFixedFields && !toFixedFields && opts.precision === undefined) {
+					missing.push("--precision");
+				}
+				if (missing.length > 0) {
+					const target = fromNative && !toNative ? `the ${coreClass} class` : microarchitecture;
+					return fail(
+						`Pass ${missing.join(" and ")} to change this ${core.Class} ${core.Microarchitecture} core to ${target}.`,
+					);
+				}
+				// Without --class or --microarchitecture, what the core takes depends on the stored core.
+				const storedConflict =
+					(opts.class === undefined && nativeConflictError(coreClass, opts)) ||
+					bypassConflictError(microarchitecture, opts);
+				if (storedConflict) return fail(storedConflict);
+
+				// A native class takes no Precision or DependencyTracking of its own, so the
+				// stored values are not carried over to it, and a Bypass core has a Precision
+				// of 0. An older core has only the legacy CorrelationTracking, which the PATCH
+				// migrates. When the stored mode does not suit the target microarchitecture,
+				// use the only mode it accepts, or ask for one.
+				let dependencyTracking: DependencyTracking | undefined = opts.dependencyTracking;
+				if (!toNative && dependencyTracking === undefined) {
+					const accepted: DependencyTracking[] | undefined =
+						TRACKING_BY_MICROARCHITECTURE[microarchitecture as Microarchitecture];
+					dependencyTracking =
+						core.DependencyTracking ??
+						(core.CorrelationTracking && LEGACY_DEPENDENCY_TRACKING[core.CorrelationTracking]);
+					if (accepted && !(dependencyTracking && accepted.includes(dependencyTracking))) {
+						if (accepted.length !== 1) {
+							return fail(
+								`Dependency tracking ${dependencyTracking ?? "(none)"} does not suit ${microarchitecture}. Pass --dependency-tracking (${accepted.join(" or ")}) to update this core.`,
+							);
+						}
+						dependencyTracking = accepted[0];
+					}
+				}
+				const patch = {
+					Name: core.Name,
+					Class: coreClass,
+					Microarchitecture: microarchitecture,
+					...(!toNative && {
+						Precision: toFixedFields ? FIXED_PRECISION : core.Precision,
+						DependencyTracking: dependencyTracking,
+					}),
+				} as CorePatchRequest;
 
 				if (typeof opts.name === "string") patch.Name = opts.name;
-				if (typeof opts.class === "string") patch.Class = opts.class;
 				if (Number.isFinite(opts.precision)) patch.Precision = opts.precision;
 				if (Number.isFinite(opts.memory)) patch.MemorySize = opts.memory;
-				if (typeof opts.microarchitecture === "string") patch.Microarchitecture = opts.microarchitecture;
-				if (typeof opts.correlationTracking === "string") patch.CorrelationTracking = opts.correlationTracking;
 
 				const res = await client.cores.update(id, patch);
 				spinner.succeed("Core updated");
