@@ -15,7 +15,7 @@ jest.mock("ora", () => ({
 
 jest.mock("../../utils/sdk", () => {
 	const cores = {
-		list: jest.fn().mockResolvedValue({ Cores: [{ CoreID: "c1" }] }),
+		listAll: jest.fn().mockResolvedValue([{ CoreID: "c1" }]),
 		getOne: jest.fn().mockResolvedValue({ CoreID: "c1" }),
 		create: jest.fn().mockResolvedValue({ CoreID: "c2" }),
 		update: jest.fn().mockResolvedValue({ CoreID: "c3" }),
@@ -56,30 +56,30 @@ describe("cores CLI", () => {
 		logs.length = 0;
 		exitCode = undefined;
 		process.exitCode = undefined;
-		mockCoresAPI.list.mockResolvedValue({ Cores: [{ CoreID: "c1" }] });
+		mockCoresAPI.listAll.mockResolvedValue([{ CoreID: "c1" }]);
 	});
 
 	it("list without --default", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "cores", "list"]);
 		// With no flag, cores list fetches default and custom separately, so two calls.
-		expect(mockCoresAPI.list).toHaveBeenCalledWith({ default: true });
-		expect(mockCoresAPI.list).toHaveBeenCalledWith({});
-		expect(mockCoresAPI.list).toHaveBeenCalledTimes(2);
+		expect(mockCoresAPI.listAll).toHaveBeenCalledWith({ default: true });
+		expect(mockCoresAPI.listAll).toHaveBeenCalledWith({});
+		expect(mockCoresAPI.listAll).toHaveBeenCalledTimes(2);
 	});
 
 	it("list with --default", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "cores", "list", "--default"]);
-		expect(mockCoresAPI.list).toHaveBeenCalledWith({ default: true });
+		expect(mockCoresAPI.listAll).toHaveBeenCalledWith({ default: true });
 	});
 
 	it("list with empty result exits 0 and prints the empty structure", async () => {
 		// An empty list is a success, so it prints the empty structure and does not exit.
-		mockCoresAPI.list.mockResolvedValue({ Cores: [] });
+		mockCoresAPI.listAll.mockResolvedValue([]);
 		const program = makeProgram();
 		await expect(program.parseAsync(["node", "x", "cores", "list"])).resolves.toBeDefined();
-		expect(mockCoresAPI.list).toHaveBeenCalled();
+		expect(mockCoresAPI.listAll).toHaveBeenCalled();
 		expect(exitCode).toBeUndefined();
 		const printed = logs.join("\n");
 		expect(printed).toContain('"Cores": []');
@@ -120,7 +120,7 @@ describe("cores CLI", () => {
 	});
 
 	it("list table shows the legacy CorrelationTracking of older cores", async () => {
-		mockCoresAPI.list.mockResolvedValue({ Cores: [{ CoreID: "c1", CorrelationTracking: "Autocorrelation" }] });
+		mockCoresAPI.listAll.mockResolvedValue([{ CoreID: "c1", CorrelationTracking: "Autocorrelation" }]);
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "cores", "list", "--format", "table", "--columns", "id,dependency"]);
 		expect(logs.join("\n")).toContain("Autocorrelation");
@@ -149,7 +149,8 @@ describe("cores CLI", () => {
 		expect(mockCoresAPI.getOne).not.toHaveBeenCalled();
 	});
 
-	it("create still forwards a deprecated --memory", async () => {
+	it("create does not send --memory and warns that the Signaloid Cloud Compute Engine ignores it", async () => {
+		mockCoresAPI.create.mockResolvedValueOnce({ CoreID: "c2", MemorySize: 8192000000 });
 		const program = makeProgram();
 		await program.parseAsync([
 			"node",
@@ -169,7 +170,27 @@ describe("cores CLI", () => {
 			"--dependency-tracking",
 			"Basic",
 		]);
-		expect(mockCoresAPI.create).toHaveBeenCalledWith(expect.objectContaining({ MemorySize: 2048 }));
+		expect(mockCoresAPI.create.mock.calls[0][0]).not.toHaveProperty("MemorySize");
+		expect(errorSpy).toHaveBeenCalledWith(
+			"Warning: --memory is ignored. The Signaloid Cloud Compute Engine sets the memory size from the core class. It set this core's memory size to 8192000000 bytes.",
+		);
+	});
+
+	it("update does not send --memory and warns that the Signaloid Cloud Compute Engine ignores it", async () => {
+		mockCoresAPI.getOne.mockResolvedValueOnce({
+			CoreID: "core-3",
+			Name: "Old",
+			Class: "C0Pro",
+			Precision: 32,
+			Microarchitecture: "Athens",
+			DependencyTracking: "Basic",
+		});
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "cores", "update", "--core-id", "core-3", "--memory", "2048"]);
+		expect(mockCoresAPI.update.mock.calls[0][1]).not.toHaveProperty("MemorySize");
+		expect(errorSpy).toHaveBeenCalledWith(
+			"Warning: --memory is ignored. The Signaloid Cloud Compute Engine sets the memory size from the core class.",
+		);
 	});
 
 	it("update with partial fields", async () => {

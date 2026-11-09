@@ -13,9 +13,10 @@ jest.mock("ora", () => ({
 	}),
 }));
 
-const mockLoadJsonIfPath = jest.fn();
+const mockLoadUxPayloadFile = jest.fn();
 jest.mock("../../utils/params", () => ({
-	loadJsonIfPath: jest.fn((...args) => mockLoadJsonIfPath(...args)),
+	...jest.requireActual("../../utils/params"),
+	loadUxPayloadFile: jest.fn((...args) => mockLoadUxPayloadFile(...args)),
 }));
 
 jest.mock("../../utils/sdk", () => {
@@ -85,25 +86,26 @@ describe("samples CLI", () => {
 	});
 
 	it("from-ux with payload and count", async () => {
-		mockLoadJsonIfPath.mockResolvedValueOnce({ payload: "ux" });
+		mockLoadUxPayloadFile.mockResolvedValueOnce("ux");
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "samples", "from-ux-string", "--file", "ux.json", "--count", "123"]);
-		expect(mockSamplesAPI.getSamplesFromUx).toHaveBeenCalledWith({ payload: "ux" }, 123);
+		expect(mockLoadUxPayloadFile).toHaveBeenCalledWith("ux.json", { uxStringOnly: true });
+		expect(mockSamplesAPI.getSamplesFromUx).toHaveBeenCalledWith("ux", 123);
 	});
 
 	it("from-ux without count", async () => {
-		mockLoadJsonIfPath.mockResolvedValueOnce({ payload: "ux2" });
+		mockLoadUxPayloadFile.mockResolvedValueOnce("ux2");
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "samples", "from-ux-string", "--file", "ux2.json"]);
-		expect(mockSamplesAPI.getSamplesFromUx).toHaveBeenCalledWith({ payload: "ux2" }, undefined);
+		expect(mockSamplesAPI.getSamplesFromUx).toHaveBeenCalledWith("ux2", undefined);
 	});
 
 	it("from-ux exits on payload load error", async () => {
-		mockLoadJsonIfPath.mockRejectedValueOnce(new Error("bad file"));
+		mockLoadUxPayloadFile.mockRejectedValueOnce(new Error("bad file"));
 		const program = makeProgram();
-		await expect(program.parseAsync(["node", "x", "samples", "from-ux-string", "--file", "bad.json"])).rejects.toThrow(
-			/EXIT/,
-		);
+		await expect(
+			program.parseAsync(["node", "x", "samples", "from-ux-string", "--file", "bad.json"]),
+		).rejects.toThrow(/EXIT/);
 		expect(exitCode).toBe(1);
 	});
 });

@@ -220,7 +220,8 @@ export default function auth(program: Command) {
 
 				let hasApiKeys = false;
 				try {
-					const keys = await client.keys.list();
+					// One key is enough to know there are some.
+					const keys = await client.keys.list({ limit: 1 });
 					hasApiKeys = (keys.Count ?? keys.Keys?.length ?? 0) > 0;
 				} catch {
 					// if this fails, skip the suggestion; don't break login

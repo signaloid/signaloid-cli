@@ -1,60 +1,217 @@
 import { table, getBorderCharacters } from "table";
 import chalk from "chalk";
-import { Spinner } from "./spinner";
-import { printData } from "./verbosity";
+import { ERROR_CODES, SdkError, paginate } from "@signaloid/scce-sdk";
+import type { PageCursor, PaginatedResponse, PaginationQueryParams } from "@signaloid/scce-sdk";
+import { Command, Option } from "commander";
+import { printData, printError, printInfo } from "./verbosity";
+import { parsePositiveInt } from "./validation";
+import { EXIT_CODES } from "./exit-codes";
+import type { Spinner } from "./spinner";
 
 export type OutputFormat = "json" | "table";
 
+/** `--limit` help for a listing whose page size is `defaultSize` by default, and at most `max`. */
+export function limitHelp(defaultSize: number, max = 100): string {
+	return `Items per request, at most ${max} (default ${defaultSize})`;
+}
+
 /**
- * Fetch items with pagination support using ContinuationKey
+ * Adds the pagination options of a listing: `--cursor`, the deprecated `--start-key` unless
+ * `startKey` is false (the two conflict), `--count`, and `--limit` with `limitHelp`. Pass
+ * `startKey: false` for a listing that never had `startKey`.
+ */
+export function addPaginationOptions(
+	cmd: Command,
+	{
+		limitHelp: help = limitHelp(25),
+		startKey = true,
+		filtersAfterLimit = false,
+	}: { limitHelp?: string; startKey?: boolean; filtersAfterLimit?: boolean } = {},
+): Command {
+	const cursor = new Option(
+		"--cursor <cursor>",
+		"Resume a listing from the Cursor value of the previous output, with the same filters",
+	);
+	cmd.addOption(startKey ? cursor.conflicts("startKey") : cursor);
+	if (startKey) {
+		cmd.addOption(
+			new Option(
+				"--start-key <key>",
+				"Deprecated, use --cursor. Resume from the ContinuationKey of the previous output",
+			),
+		);
+	}
+	cmd.option(
+		"--count <n>",
+		filtersAfterLimit
+			? "Number of items to fetch, across pages. With --status, each request reads a full page, so the output can hold more"
+			: "Number of items to fetch, across pages. The output's Cursor resumes after the last one",
+		parsePositiveInt,
+	);
+	return cmd.option("--limit <n>", help, parsePositiveInt);
+}
+
+/** The pagination options of a listing. Parsed command options carry these same names. */
+export type PaginationOptions = PaginationQueryParams & {
+	/** Without it, one page is fetched. */
+	count?: number;
+	/**
+	 * The API filters a page after applying `limit`, as builds and tasks do with `--status`.
+	 * Then a page that asks only for the items still needed can return far fewer, so each
+	 * request asks for a full page instead, and the result can hold more than `count`.
+	 */
+	filtersAfterLimit?: boolean;
+	/**
+	 * False for a listing without `--start-key`, whose output then leaves out the API's
+	 * `ContinuationKey`, as no option of the command takes it.
+	 */
+	continuationKey?: boolean;
+};
+
+/**
+ * Where the next listing resumes: pass `Cursor` as `--cursor`, or the older `ContinuationKey` as
+ * `--start-key`. Neither is there on the last page.
+ */
+type ResumeCursor = { Cursor?: string; ContinuationKey?: string };
+
+/**
+ * What a listing read. `stalled` is the error message when the API stopped advancing it, in
+ * which case `items` are those read so far, `next` is empty, and the exit code is an error.
+ */
+export type ListingResult<T> = { items: T[]; next: ResumeCursor; stalled?: string; lastPage?: Page };
+
+type Page = PaginatedResponse & Record<string, any>;
+
+function resumeCursorOf(page: Page | undefined, continuationKey: boolean): ResumeCursor {
+	if (!page) return {};
+	return {
+		...(page.Pagination?.Links.Next?.Cursor && { Cursor: page.Pagination.Links.Next.Cursor }),
+		...(continuationKey && page.ContinuationKey && { ContinuationKey: page.ContinuationKey }),
+	};
+}
+
+/**
+ * Fetch items from a paginated listing, with the SDK's `paginate()`.
+ *
+ * Without `count` it makes one request. With it, it follows the listing until it has `count`
+ * items or the listing ends. Each request asks for no more items than are still needed, so
+ * the result has at most `count` items and `next` resumes right after the last one. A page can
+ * be short or empty and still not be the last, so only the end of the listing stops it early.
+ * An API without `Pagination` can ignore `limit` and return more items.
  */
 export async function fetchWithPagination<T>(
-	fetchFunction: (startKey?: string) => Promise<{ ContinuationKey?: string; [key: string]: any }>,
+	fetchPage: (query: PaginationQueryParams) => Promise<Page>,
 	itemsKey: string,
-	targetCount?: number,
-	spinner?: Spinner,
-	initialStartKey?: string,
-): Promise<{ items: T[]; continuationKey?: string }> {
-	let allItems: T[] = [];
-	let nextKey: string | undefined = initialStartKey;
-	let requestCount = 0;
+	{ count, cursor, startKey, limit, filtersAfterLimit, continuationKey = true }: PaginationOptions = {},
+): Promise<ListingResult<T>> {
+	const firstCursor: PageCursor = { ...(cursor && { cursor }), ...(startKey && { startKey }) };
+	const items: T[] = [];
+	let lastPage: Page | undefined;
 
-	if (!targetCount) {
-		// Single request without pagination
-		const res = await fetchFunction(initialStartKey);
-		return {
-			items: (res as any)[itemsKey] || [],
-			continuationKey: res.ContinuationKey,
-		};
-	}
-
-	// Fetch items using pagination
-	while (allItems.length < targetCount) {
-		requestCount++;
-		const res = await fetchFunction(nextKey);
-
-		const items = (res as any)[itemsKey] || [];
-		allItems = allItems.concat(items);
-
-		// Check if we have a continuation key for pagination
-		nextKey = res.ContinuationKey;
-
-		// Break if no more items or no continuation token
-		if (!nextKey || items.length === 0) {
-			break;
+	const pages = paginate((position) => {
+		const remaining = count && !filtersAfterLimit ? count - items.length : undefined;
+		const size = remaining === undefined ? limit : Math.min(limit ?? remaining, remaining);
+		return fetchPage({ ...position, ...(size !== undefined && { limit: size }) });
+	}, firstCursor);
+	try {
+		for await (const page of pages) {
+			// An engine without `Pagination` ignores `cursor`, so its page would be the first one
+			// again, passed off as the next.
+			if (cursor && !lastPage && !page.Pagination) {
+				throw new Error(
+					"This Signaloid Cloud Compute Engine does not take --cursor. Pass the ContinuationKey of the previous output as --start-key instead.",
+				);
+			}
+			lastPage = page;
+			items.push(...(page[itemsKey] ?? []));
+			if (!count || items.length >= count) break;
 		}
-
-		// If we've exceeded the target, we'll trim later
-		if (allItems.length >= targetCount) {
-			break;
-		}
+	} catch (error) {
+		// The API stopped advancing the listing. The command shows what was read, and
+		// finishListingSpinner() reports the stall once its spinner has stopped.
+		if (!(error instanceof SdkError && error.code === ERROR_CODES.PAGINATION_STALLED)) throw error;
+		return { items, next: {}, stalled: `${error.message} Showing the items read so far.`, lastPage };
 	}
+	return { items, next: resumeCursorOf(lastPage, continuationKey), lastPage };
+}
 
-	// Trim to exact count and return with the last continuation key
-	return {
-		items: allItems.slice(0, targetCount),
-		continuationKey: nextKey,
+/**
+ * The JSON output of a paginated listing: the items under `itemsKey`, their `Count`, then where
+ * to resume.
+ */
+export function paginatedOutput<T>(itemsKey: string, result: ListingResult<T>) {
+	return { [itemsKey]: result.items, Count: result.items.length, ...result.next };
+}
+
+/**
+ * Prints the items of a listing as a table on stdout. When more items remain, it then tells on
+ * stderr how to resume, as a table has no room for the cursor. On the last page, it adds nothing.
+ */
+export function printListingTable<T>(
+	resource: keyof typeof AVAILABLE_COLUMNS,
+	result: ListingResult<T>,
+	columns?: string[] | null,
+) {
+	printData(createCustomTable(resource, result.items, columns));
+	if (result.next.Cursor) printInfo(`More items: --cursor ${result.next.Cursor}`);
+	else if (result.next.ContinuationKey) printInfo(`More items: --start-key ${result.next.ContinuationKey}`);
+}
+
+/** Prints `paginatedOutput()` as JSON, after the fields of `extra`, such as the parent's ID. */
+export function printListing<T>(itemsKey: string, result: ListingResult<T>, extra: Record<string, unknown> = {}) {
+	printData(JSON.stringify({ ...extra, ...paginatedOutput(itemsKey, result) }, null, 2));
+}
+
+/**
+ * Stops the spinner of a listing. When the API stopped advancing it, the spinner fails, the
+ * error message follows, and the exit code is an error, so a script does not take the missing
+ * resume cursor for the end of the listing.
+ */
+export function finishListingSpinner(spinner: Spinner, result: { stalled?: string }): void {
+	if (result.stalled === undefined) {
+		spinner.succeed();
+		return;
+	}
+	spinner.fail();
+	printError(result.stalled);
+	process.exitCode = EXIT_CODES.ERROR;
+}
+
+/** Runs `fn` over `items` with at most `limit` calls in flight, keeping the order. */
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const i = next++;
+			results[i] = await fn(items[i]);
+		}
 	};
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+	return results;
+}
+
+/**
+ * Lists a resource whose listing returns only IDs (buckets, drives), then fetches each one, a
+ * few at a time. An API without `Pagination` ignores `limit` here and can return more IDs than
+ * `count`. Its ContinuationKey is the last ID, so the IDs are trimmed to `count` and the
+ * listing resumes after the last one kept. A `Cursor` cannot be moved that way, so a listing
+ * that has one is not trimmed.
+ */
+export async function listByIds<R>(
+	listPage: (query: PaginationQueryParams) => Promise<Page>,
+	idsKey: string,
+	getOne: (id: string) => Promise<R>,
+	options: PaginationOptions,
+): Promise<ListingResult<R>> {
+	let { items: ids, next, stalled } = await fetchWithPagination<string>(listPage, idsKey, options);
+	// A stalled listing has no reliable place to resume, so it gets no ContinuationKey.
+	if (!stalled && options.count && ids.length > options.count && !next.Cursor) {
+		ids = ids.slice(0, options.count);
+		next = { ContinuationKey: ids[ids.length - 1] };
+	}
+	// The last page holds IDs, not the items, so it is not passed on.
+	return { items: await mapWithConcurrency(ids, 8, getOne), next, stalled };
 }
 
 /**
@@ -116,10 +273,10 @@ export const AVAILABLE_COLUMNS = {
 		updated: { key: "UpdatedAt", header: "Updated", width: 25 },
 	},
 	files: {
-		path: { key: "path", header: "Path", width: 50 },
-		size: { key: "size", header: "Size", width: 12 },
-		etag: { key: "etag", header: "Etag", width: 15 },
-		modified: { key: "last_modified", header: "Modified", width: 25 },
+		path: { key: "Path", header: "Path", width: 50 },
+		size: { key: "Size", header: "Size", width: 12 },
+		etag: { key: "ETag", header: "Etag", width: 15 },
+		modified: { key: "LastModified", header: "Modified", width: 25 },
 	},
 	keys: {
 		id: { key: "KeyID", header: "Key ID", width: 30 },
@@ -132,8 +289,6 @@ export const AVAILABLE_COLUMNS = {
 		id: { key: "BucketID", header: "Bucket ID", width: 30 },
 		name: { key: "Name", header: "Name", width: 25 },
 		account: { key: "Account", header: "Account", width: 30 },
-		region: { key: "Region", header: "Region", width: 15 },
-		mountPath: { key: "MountPath", header: "Mount Path", width: 30 },
 		read: { key: "Read", header: "Read", width: 8 },
 		write: { key: "Write", header: "Write", width: 8 },
 		created: { key: "CreatedAt", header: "Created", width: 25 },
@@ -146,11 +301,11 @@ export const AVAILABLE_COLUMNS = {
 		updated: { key: "UpdatedAt", header: "Updated", width: 25 },
 	},
 	webhooks: {
-		id: { key: "webhookId", header: "Webhook ID", width: 30 },
-		url: { key: "url", header: "URL", width: 50 },
-		events: { key: "events", header: "Events", width: 30 },
-		status: { key: "status", header: "Status", width: 12 },
-		created: { key: "createdAt", header: "Created", width: 25 },
+		id: { key: "WebhookID", header: "Webhook ID", width: 30 },
+		url: { key: "URL", header: "URL", width: 50 },
+		events: { key: "Events", header: "Events", width: 30 },
+		status: { key: "Status", header: "Status", width: 12 },
+		created: { key: "CreatedAt", header: "Created", width: 25 },
 	},
 };
 
@@ -164,7 +319,7 @@ export const DEFAULT_COLUMNS = {
 	repos: ["id", "url", "core", "branch"],
 	files: ["path", "size", "etag", "modified"],
 	keys: ["id", "name", "created", "validUntil"],
-	buckets: ["id", "name", "account", "region", "mountPath"],
+	buckets: ["id", "name", "account", "read", "write"],
 	drives: ["id", "name", "created", "updated"],
 	webhooks: ["id", "url", "status", "created"],
 };

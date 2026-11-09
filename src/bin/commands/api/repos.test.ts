@@ -48,6 +48,14 @@ describe("repos commands", () => {
 			expect(listCmd?.description()).toBe("List repositories");
 		});
 
+		it("gives list --cursor but not the deprecated --start-key, which it never had", () => {
+			const reposCmd = program.commands.find((cmd) => cmd.name() === "repos");
+			const listCmd = reposCmd?.commands.find((cmd) => cmd.name() === "list");
+			const flags = listCmd?.options.map((option) => option.long);
+			expect(flags).toContain("--cursor");
+			expect(flags).not.toContain("--start-key");
+		});
+
 		it("should register get subcommand", () => {
 			const reposCmd = program.commands.find((cmd) => cmd.name() === "repos");
 			const getCmd = reposCmd?.commands.find((cmd) => cmd.name() === "get");
@@ -197,7 +205,9 @@ describe("repos commands", () => {
 			const { makeClient } = jest.requireMock("../../utils/sdk");
 			makeClient.mockReturnValue({
 				repositories: {
-					list: jest.fn().mockResolvedValue({ Repositories: [{ RepositoryID: "r1" }, { RepositoryID: "r2" }] }),
+					list: jest
+						.fn()
+						.mockResolvedValue({ Repositories: [{ RepositoryID: "r1" }, { RepositoryID: "r2" }] }),
 				},
 			});
 			const { loadConfig } = jest.requireMock("../../utils/config");

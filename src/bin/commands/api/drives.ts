@@ -6,18 +6,31 @@ import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import {
 	OutputFormat,
+	finishListingSpinner,
+	listByIds,
+	printListing,
+	printListingTable,
 	createCustomTable,
 	parseColumns,
 	showAvailableColumns,
+	addPaginationOptions,
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import type { ResourceType } from "@signaloid/scce-sdk";
+
+// The data source types a drive can mount. The API's Drive type is not mountable in a drive.
+type DriveResourceType = Exclude<ResourceType, "Drive">;
+const DRIVE_RESOURCE_TYPES = Object.keys({
+	Bucket: true,
+	SignaloidCloudStorage: true,
+} satisfies Record<DriveResourceType, true>) as DriveResourceType[];
 
 type DataSource = {
 	Object?: "DataSource";
 	ResourceID: string;
-	ResourceType: "Gateway" | "Bucket" | "SignaloidCloudStorage";
+	ResourceType: DriveResourceType;
 	Location: string;
 };
 
@@ -32,10 +45,9 @@ function normalizeDataSource(input: any): DataSource {
 	};
 	(ds as any).Object = "DataSource";
 
-	const validTypes = new Set<DataSource["ResourceType"]>(["Gateway", "Bucket", "SignaloidCloudStorage"]);
-	if (!validTypes.has(ds.ResourceType)) {
+	if (!DRIVE_RESOURCE_TYPES.includes(ds.ResourceType)) {
 		throw new Error(
-			`Invalid ResourceType '${input.ResourceType}'. Expected one of Gateway|Bucket|SignaloidCloudStorage.`,
+			`Invalid ResourceType '${input.ResourceType}'. Expected one of ${DRIVE_RESOURCE_TYPES.join("|")}.`,
 		);
 	}
 	if (!ds.ResourceID) throw new Error("DataSource.ResourceID is required");
@@ -81,7 +93,7 @@ async function collectDataSources(opts: {
  * Registers the 'drives' command and subcommands for managing virtual drives.
  *
  * This command provides functionality for managing virtual drives that connect
- * data sources (such as buckets, gateways, or cloud storage) to Signaloid applications.
+ * data sources (such as buckets or cloud storage) to Signaloid applications.
  *
  * Available subcommands:
  * - list: List all drives with optional pagination
@@ -96,7 +108,7 @@ async function collectDataSources(opts: {
  * ```
  * signaloid-cli drives list
  * signaloid-cli drives get --drive-id drive-123
- * signaloid-cli drives create --name MyDrive --ds '{"ResourceID":"bucket-1","ResourceType":"Bucket","Location":"/"}'
+ * signaloid-cli drives create --name MyDrive --ds '{"ResourceID":"bucket-1","ResourceType":"Bucket","Location":"data"}'
  * signaloid-cli drives update --drive-id drive-123 --name UpdatedDrive
  * ```
  */
@@ -105,10 +117,9 @@ export default function drives(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	// signaloid-cli drives list --start-key sk_123 --count 20
-	cmd.command("list")
+	// signaloid-cli drives list --cursor <cursor> --count 20
+	addPaginationOptions(cmd.command("list"))
 		.description("List drives")
-		.option("--start-key <key>", "Pagination cursor token")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -122,21 +133,21 @@ export default function drives(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const listRes = await client.drives.list(opts.startKey ? { startKey: opts.startKey } : undefined);
-				const driveIds: string[] = listRes.drive_ids || [];
-
-				const drives = await Promise.all(
-					driveIds.map((id) => client.drives.getOne(id)),
+				const result = await listByIds(
+					(query) => client.drives.list(query),
+					"DriveIDs",
+					(id) => client.drives.getOne(id),
+					opts,
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					printData(JSON.stringify({ Drives: drives }, null, 2));
+					printListing("Drives", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("drives", drives, selectedColumns));
+					printListingTable("drives", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list drives");
@@ -162,7 +173,7 @@ export default function drives(program: Command) {
 			}
 		});
 
-	// signaloid-cli drives create --name MyDrive --ds '{"ResourceID":"...","ResourceType":"Bucket","Location":"/"}'
+	// signaloid-cli drives create --name MyDrive --ds '{"ResourceID":"...","ResourceType":"Bucket","Location":"data"}'
 	// or: --ds-file ./datasources.json (array of DataSource)
 	cmd.command("create")
 		.description("Create a drive")

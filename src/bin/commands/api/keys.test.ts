@@ -16,6 +16,7 @@ jest.mock("ora", () => ({
 jest.mock("../../utils/sdk", () => {
 	const keys = {
 		list: jest.fn().mockResolvedValue({ Keys: [{ KeyID: "k1", Name: "MyKey" }] }),
+		listAll: jest.fn().mockResolvedValue([{ KeyID: "k1", Name: "MyKey" }]),
 		create: jest.fn().mockResolvedValue({ KeyID: "k2" }),
 		delete: jest.fn().mockResolvedValue({ deleted: true }),
 	};
@@ -35,6 +36,7 @@ jest.mock("inquirer", () => ({
 }));
 
 import keysCmd, { keyIdFromApiKey } from "./keys";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockKeysAPI, makeClient } = jest.requireMock("../../utils/sdk");
 const { default: mockInquirer } = jest.requireMock("inquirer") as { default: { prompt: jest.Mock } };
 
@@ -69,6 +71,29 @@ describe("keys CLI", () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "keys", "list"]);
 		expect(mockKeysAPI.list).toHaveBeenCalled();
+	});
+
+	it("list --count reads pages until it has that many keys, and ends with the Cursor to resume", async () => {
+		const log = jest.mocked(console.log);
+		const page = (ids: string[], next?: string) => ({
+			Keys: ids.map((KeyID) => ({ KeyID })),
+			Count: ids.length,
+			Pagination: paginationBlock(next, 1),
+		});
+		mockKeysAPI.list.mockResolvedValueOnce(page(["k1"], "t1")).mockResolvedValueOnce(page(["k2"], "t2"));
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "keys", "list", "--count", "2"]);
+		expect(mockKeysAPI.list.mock.calls).toEqual([[{ limit: 2 }], [{ cursor: "t1", limit: 1 }]]);
+		const printed = JSON.parse(log.mock.calls[log.mock.calls.length - 1][0]);
+		expect(printed).toEqual({ Keys: [{ KeyID: "k1" }, { KeyID: "k2" }], Count: 2, Cursor: "t2" });
+	});
+
+	it("list has no --start-key, which the keys listing never had", async () => {
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "keys", "list", "--start-key", "k1"])).rejects.toThrow(
+			/unknown option/,
+		);
+		expect(mockKeysAPI.list).not.toHaveBeenCalled();
 	});
 
 	it("create without valid-until", async () => {
@@ -167,7 +192,8 @@ describe("keys CLI", () => {
 		mockInquirer.prompt.mockResolvedValueOnce({ selectedKeyId: "k1" });
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "keys", "delete"]);
-		expect(mockKeysAPI.list).toHaveBeenCalled();
+		// The picker offers every key, across pages.
+		expect(mockKeysAPI.listAll).toHaveBeenCalled();
 		expect(mockKeysAPI.delete).toHaveBeenCalledWith("k1");
 	});
 

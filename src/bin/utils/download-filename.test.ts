@@ -9,7 +9,7 @@ const headers = (contentDisposition?: string): Headers => {
 const URL_WITH_KEY = "https://bucket.s3.amazonaws.com/bld_abc123/bld_abc123.bin?X-Amz-Signature=deadbeef";
 
 describe("resolveDownloadFilename", () => {
-	it("uses the filename the server sends in content-disposition", () => {
+	it("uses the filename the Signaloid Cloud Compute Engine sends in content-disposition", () => {
 		const name = resolveDownloadFilename(headers('attachment; filename="bld_abc123.bin"'), URL_WITH_KEY, "fb.bin");
 
 		expect(name).toBe("bld_abc123.bin");
@@ -43,7 +43,7 @@ describe("resolveDownloadFilename", () => {
 		expect(name).toBe("fb.bin");
 	});
 
-	it("ignores a path in the server filename so it cannot escape the output directory", () => {
+	it("ignores a path in the Signaloid Cloud Compute Engine filename so it cannot escape the output directory", () => {
 		const name = resolveDownloadFilename(
 			headers('attachment; filename="../../etc/passwd"'),
 			URL_WITH_KEY,
@@ -53,7 +53,7 @@ describe("resolveDownloadFilename", () => {
 		expect(name).toBe("passwd");
 	});
 
-	it("falls back when the server filename is only path separators", () => {
+	it("falls back when the Signaloid Cloud Compute Engine filename is only path separators", () => {
 		const name = resolveDownloadFilename(headers('attachment; filename="../.."'), URL_WITH_KEY, "fb.bin");
 
 		expect(name).toBe("bld_abc123.bin");

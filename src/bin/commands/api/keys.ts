@@ -3,9 +3,14 @@ import { createSpinner } from "../../utils/spinner";
 import chalk from "chalk";
 import { loadConfig } from "../../utils/config";
 import {
-	OutputFormat,
+	addPaginationOptions,
 	createCustomTable,
+	finishListingSpinner,
 	fetchWithPagination,
+	limitHelp,
+	OutputFormat,
+	printListing,
+	printListingTable,
 	parseColumns,
 	showAvailableColumns,
 } from "../../utils/output";
@@ -57,9 +62,11 @@ export default function keys(program: Command) {
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	// signaloid-cli keys list
-	cmd.command("list")
+	addPaginationOptions(cmd.command("list"), {
+		limitHelp: limitHelp(100),
+		startKey: false,
+	})
 		.description("List API keys")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -72,32 +79,17 @@ export default function keys(program: Command) {
 			const spinner = createSpinner("Fetching API keys...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
-				// Note: keys.list() doesn't support pagination parameters via SDK
-				// So we'll make a simple wrapper that ignores the startKey
-				const result = await fetchWithPagination<any>(
-					async (_startKey) => {
-						const res = await client.keys.list();
-						return res as any;
-					},
-					"Keys",
-					targetCount,
-					spinner,
-				);
+				const result = await fetchWithPagination((query) => client.keys.list(query), "Keys", opts);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const selectedColumns = parseColumns(opts.columns);
 				const format = (selectedColumns ? "table" : opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Keys: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					printData(JSON.stringify(output, null, 2));
+					printListing("Keys", result);
 				} else {
-					printData(createCustomTable("keys", result.items, selectedColumns));
+					printListingTable("keys", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list keys");
@@ -184,13 +176,12 @@ export default function keys(program: Command) {
 			}
 
 			if (!keyId) {
-				// Interactive flow: fetch all keys and let the user pick one.
+				// Interactive flow: fetch all keys, across pages, and let the user pick one.
 				const fetchSpinner = createSpinner("Fetching API keys...");
 				let keys: any[] = [];
 				try {
-					const res = await client.keys.list();
+					keys = await client.keys.listAll();
 					fetchSpinner.succeed();
-					keys = (res as any).Keys ?? [];
 				} catch (e: any) {
 					fetchSpinner.fail("Failed to fetch API keys");
 					await handleCliError(e, "Listing API keys");

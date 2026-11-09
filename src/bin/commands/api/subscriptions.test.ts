@@ -13,7 +13,6 @@ jest.mock("ora", () => ({
 	}),
 }));
 
-
 jest.mock("../../utils/sdk", () => {
 	const subscriptions = {
 		get: jest.fn().mockResolvedValue({ plan: "basic" }),
@@ -55,5 +54,4 @@ describe("subscriptions CLI", () => {
 		await program.parseAsync(["node", "x", "subscriptions", "get"]);
 		expect(mockSubscriptionsAPI.get).toHaveBeenCalled();
 	});
-
 });

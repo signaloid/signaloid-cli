@@ -6,7 +6,14 @@ import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { OutputFormat, displayResource } from "../../utils/output";
+import {
+	addPaginationOptions,
+	displayResource,
+	finishListingSpinner,
+	fetchWithPagination,
+	limitHelp,
+	OutputFormat,
+} from "../../utils/output";
 import { printData } from "../../utils/verbosity";
 
 const REMOVABLE_FIELDS: readonly UserPatchRemovableField[] = ["Editor_Execution_DataSources", "Editor_Execution_Core"];
@@ -122,7 +129,12 @@ export default function users(program: Command) {
 	// signaloid-cli users update [--pref Key=Value ...] [--role r] [--industry i] [--payload-file file.json]
 	cmd.command("update")
 		.description("Update current user profile and preferences")
-		.option("--pref <key=value>", "Set a preference (repeatable)", (v: string, prev: string[]) => (prev ? [...prev, v] : [v]), [] as string[])
+		.option(
+			"--pref <key=value>",
+			"Set a preference (repeatable)",
+			(v: string, prev: string[]) => (prev ? [...prev, v] : [v]),
+			[] as string[],
+		)
 		.option(
 			"--remove <field>",
 			`Remove a preference field (repeatable, allowed: ${REMOVABLE_FIELDS.join(", ")})`,
@@ -155,7 +167,7 @@ export default function users(program: Command) {
 				}
 
 				// Merge inline --pref flags
-				for (const kv of (opts.pref as string[])) {
+				for (const kv of opts.pref as string[]) {
 					const idx = kv.indexOf("=");
 					if (idx > 0) {
 						prefs[kv.slice(0, idx)] = kv.slice(idx + 1);
@@ -200,20 +212,17 @@ export default function users(program: Command) {
 			}
 		});
 
-	// signaloid-cli users logs [--from <iso>] [--to <iso>] [--limit n]
-	// Fetches logs for the CURRENT user (use logout-all for a specific user by ID).
-	cmd.command("logs")
+	// signaloid-cli users logs [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--cursor <cursor>]
+	// Fetches logs for the CURRENT user (use logout-all for a specific user by ID), newest first.
+	addPaginationOptions(cmd.command("logs"), {
+		limitHelp: limitHelp(100, 10_000),
+		startKey: false,
+	})
 		.description("Fetch activity logs for the current user")
 		.option("--from <iso>", "From timestamp (ISO)")
 		.option("--to <iso>", "To timestamp (ISO)")
-		.option("--count <n>", "Number of logs to fetch", (v) => {
-			const n = parseInt(v, 10);
-			if (Number.isNaN(n) || n <= 0) {
-				throw new InvalidArgumentError("must be a positive integer");
-			}
-			return n;
-		})
-		.option("--format <type>", "Output format: table|json", "json")
+		// Kept so scripts that pass it still work. Logs are always shown as JSON.
+		.addOption(new Option("--format <type>").hideHelp())
 		.action(async (opts) => {
 			const spinner = createSpinner("Fetching logs...");
 			try {
@@ -222,22 +231,22 @@ export default function users(program: Command) {
 
 				const startTime = toEpochMs(opts.from);
 				const endTime = toEpochMs(opts.to);
-				const limit = typeof opts.count === "number" ? opts.count : undefined;
+				const result = await fetchWithPagination(
+					(query) => client.users.getLogs(me.UserID, { ...query, startTime, endTime }),
+					"logs",
+					opts,
+				);
+				finishListingSpinner(spinner, result);
 
-				const res = await client.users.getLogs(me.UserID, {
-					startTime,
-					endTime,
-					limit,
-				});
-				spinner.succeed();
-
-				const format = (opts.format || "json") as OutputFormat;
-				if (format === "json") {
-					printData(JSON.stringify(res, null, 2));
-				} else {
-					// Logs are best displayed as JSON, but respect the flag
-					printData(JSON.stringify(res, null, 2));
-				}
+				// The fields besides the entries keep their names from the API: `totalResults`
+				// counts the entries shown.
+				const output = {
+					logs: result.items,
+					...result.next,
+					queryTimeRange: result.lastPage?.queryTimeRange,
+					totalResults: result.items.length,
+				};
+				printData(JSON.stringify(output, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to fetch logs");
 				await handleCliError(e);

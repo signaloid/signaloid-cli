@@ -23,7 +23,7 @@ jest.mock("node:fs/promises", () => ({
 
 jest.mock("../../utils/sdk", () => {
 	const drives = {
-		list: jest.fn().mockResolvedValue({ Drives: [] }),
+		list: jest.fn().mockResolvedValue({ UserID: "usr_1", DriveIDs: [], Count: 0 }),
 		getOne: jest.fn().mockResolvedValue({ DriveID: "d1" }),
 		create: jest.fn().mockResolvedValue({ DriveID: "d2" }),
 		update: jest.fn().mockResolvedValue({ DriveID: "d3" }),
@@ -37,6 +37,7 @@ jest.mock("../../utils/sdk", () => {
 });
 
 import drivesCmd from "./drives";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockDrivesAPI } = jest.requireMock("../../utils/sdk");
 
 const logs: string[] = [];
@@ -68,7 +69,35 @@ describe("drives CLI", () => {
 	it("list without start-key", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "drives", "list"]);
-		expect(mockDrivesAPI.list).toHaveBeenCalledWith(undefined);
+		expect(mockDrivesAPI.list).toHaveBeenCalledWith({});
+	});
+
+	it("list with cursor and limit", async () => {
+		mockDrivesAPI.list.mockResolvedValueOnce({
+			UserID: "usr_1",
+			DriveIDs: [],
+			Count: 0,
+			Pagination: paginationBlock(),
+		});
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "drives", "list", "--cursor", "tok_1", "--limit", "50"]);
+		expect(mockDrivesAPI.list).toHaveBeenCalledWith({ cursor: "tok_1", limit: 50 });
+	});
+
+	it("list refuses --cursor together with --start-key", async () => {
+		const program = makeProgram();
+		await expect(
+			program.parseAsync(["node", "x", "drives", "list", "--cursor", "tok", "--start-key", "raw"]),
+		).rejects.toThrow(/cannot be used with/);
+		expect(mockDrivesAPI.list).not.toHaveBeenCalled();
+	});
+
+	it("list has no --start, which is now --cursor", async () => {
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "drives", "list", "--start", "tok"])).rejects.toThrow(
+			/unknown option/,
+		);
+		expect(mockDrivesAPI.list).not.toHaveBeenCalled();
 	});
 
 	it("list with start-key", async () => {
@@ -86,13 +115,13 @@ describe("drives CLI", () => {
 	it("create with --ds flags only", async () => {
 		const program = makeProgram();
 		const ds1 = JSON.stringify({ ResourceID: "b1", ResourceType: "Bucket", Location: "/" });
-		const ds2 = JSON.stringify({ ResourceID: "gw1", ResourceType: "Gateway", Location: "/mnt" });
+		const ds2 = JSON.stringify({ ResourceID: "scs1", ResourceType: "SignaloidCloudStorage", Location: "mnt" });
 		await program.parseAsync(["node", "x", "drives", "create", "--name", "MyDrive", "--ds", ds1, "--ds", ds2]);
 		expect(mockDrivesAPI.create).toHaveBeenCalledWith({
 			Name: "MyDrive",
 			DataSources: [
 				{ Object: "DataSource", ResourceID: "b1", ResourceType: "Bucket", Location: "/" },
-				{ Object: "DataSource", ResourceID: "gw1", ResourceType: "Gateway", Location: "/mnt" },
+				{ Object: "DataSource", ResourceID: "scs1", ResourceType: "SignaloidCloudStorage", Location: "mnt" },
 			],
 		});
 	});
@@ -129,10 +158,10 @@ describe("drives CLI", () => {
 
 	it("update with --ds flags", async () => {
 		const program = makeProgram();
-		const ds = JSON.stringify({ ResourceID: "gw2", ResourceType: "Gateway", Location: "/c" });
+		const ds = JSON.stringify({ ResourceID: "bkt2", ResourceType: "Bucket", Location: "c" });
 		await program.parseAsync(["node", "x", "drives", "update", "--drive-id", "drv-3", "--ds", ds]);
 		expect(mockDrivesAPI.update).toHaveBeenCalledWith("drv-3", {
-			DataSources: [{ Object: "DataSource", ResourceID: "gw2", ResourceType: "Gateway", Location: "/c" }],
+			DataSources: [{ Object: "DataSource", ResourceID: "bkt2", ResourceType: "Bucket", Location: "c" }],
 		});
 	});
 

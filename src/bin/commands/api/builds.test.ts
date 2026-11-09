@@ -60,6 +60,7 @@ jest.mock("../../utils/sdk", () => {
 });
 
 import buildsCmd from "./builds";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockBuildsAPI } = jest.requireMock("../../utils/sdk");
 const { writeBinary } = jest.requireMock("../../utils/fsx");
 
@@ -109,7 +110,10 @@ describe("builds CLI", () => {
 	});
 
 	it("list with filters and limit", async () => {
-		mockBuildsAPI.list.mockResolvedValueOnce({ Builds: [1, 2, 3, 4] });
+		mockBuildsAPI.list.mockResolvedValueOnce({
+			Builds: [1, 2],
+			Pagination: paginationBlock("tok_next", 2),
+		});
 		const program = makeProgram();
 		await program.parseAsync([
 			"node",
@@ -135,8 +139,9 @@ describe("builds CLI", () => {
 			to: "2025-10-01T00:00:00Z",
 			status: "Completed",
 		});
+		// --status is applied after limit, so the request asks for a full page, not --count Builds.
 		const out = JSON.parse(logs[0]);
-		expect(out.Builds.length).toBe(2);
+		expect(out).toEqual({ Builds: [1, 2], Count: 2, Cursor: "tok_next" });
 	});
 
 	it("create:source with lang/core/args", async () => {
@@ -298,15 +303,7 @@ describe("builds CLI", () => {
 
 	it("create:repo --discover-variables sets discover flag", async () => {
 		const program = makeProgram();
-		await program.parseAsync([
-			"node",
-			"x",
-			"builds",
-			"create:repo",
-			"--repo-id",
-			"r_124",
-			"--discover-variables",
-		]);
+		await program.parseAsync(["node", "x", "builds", "create:repo", "--repo-id", "r_124", "--discover-variables"]);
 		expect(mockBuildsAPI.createFromRepository).toHaveBeenCalledWith("r_124", undefined, true);
 	});
 
@@ -375,13 +372,36 @@ describe("builds CLI", () => {
 	it("variables", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "builds", "variables", "--build-id", "b-12"]);
-		expect(mockBuildsAPI.getVariables).toHaveBeenCalledWith("b-12", undefined);
+		expect(mockBuildsAPI.getVariables).toHaveBeenCalledWith("b-12", {});
 	});
 
 	it("variables with start-key", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "builds", "variables", "--build-id", "b-13", "--start-key", "sk_abc"]);
-		expect(mockBuildsAPI.getVariables).toHaveBeenCalledWith("b-13", "sk_abc");
+		expect(mockBuildsAPI.getVariables).toHaveBeenCalledWith("b-13", { startKey: "sk_abc" });
+	});
+
+	it("variables with cursor and limit", async () => {
+		mockBuildsAPI.getVariables.mockResolvedValueOnce({
+			BuildID: "b-13",
+			Variables: [],
+			Count: 0,
+			Pagination: paginationBlock(),
+		});
+		const program = makeProgram();
+		await program.parseAsync([
+			"node",
+			"x",
+			"builds",
+			"variables",
+			"--build-id",
+			"b-13",
+			"--cursor",
+			"tok",
+			"--limit",
+			"10",
+		]);
+		expect(mockBuildsAPI.getVariables).toHaveBeenCalledWith("b-13", { cursor: "tok", limit: 10 });
 	});
 
 	it("tasks", async () => {
@@ -394,14 +414,42 @@ describe("builds CLI", () => {
 		});
 	});
 
+	it("tasks reads pages up to --count, and ends with the Cursor to resume", async () => {
+		const paged = (tasks: string[], next?: string) => ({
+			Tasks: tasks,
+			Count: tasks.length,
+			Pagination: paginationBlock(next, 1),
+		});
+		mockBuildsAPI.listTasks.mockResolvedValueOnce(paged(["t1"], "s1")).mockResolvedValueOnce(paged(["t2"], "s2"));
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "builds", "tasks", "--build-id", "b-15", "--count", "2"]);
+		expect(mockBuildsAPI.listTasks.mock.calls).toEqual([
+			["b-15", { limit: 2, from: undefined, to: undefined }],
+			["b-15", { cursor: "s1", limit: 1, from: undefined, to: undefined }],
+		]);
+		expect(JSON.parse(logs[logs.length - 1])).toEqual({
+			BuildID: "b-15",
+			Tasks: ["t1", "t2"],
+			Count: 2,
+			Cursor: "s2",
+		});
+	});
+
 	it("tasks with filters", async () => {
 		const program = makeProgram();
 		await program.parseAsync([
-			"node", "x", "builds", "tasks",
-			"--build-id", "b-15",
-			"--start-key", "sk_xyz",
-			"--from", "2025-01-01T00:00:00Z",
-			"--to", "2025-02-01T00:00:00Z",
+			"node",
+			"x",
+			"builds",
+			"tasks",
+			"--build-id",
+			"b-15",
+			"--start-key",
+			"sk_xyz",
+			"--from",
+			"2025-01-01T00:00:00Z",
+			"--to",
+			"2025-02-01T00:00:00Z",
 		]);
 		expect(mockBuildsAPI.listTasks).toHaveBeenCalledWith("b-15", {
 			startKey: "sk_xyz",
@@ -424,7 +472,7 @@ describe("builds CLI", () => {
 		expect(logs[0]).toBe("https://example.com/binary");
 	});
 
-	it("binary --out saves using the filename the server sends", async () => {
+	it("binary --out saves using the filename the Signaloid Cloud Compute Engine sends", async () => {
 		const buildId = "bld_0123456789abcdef0123456789abcdef";
 		mockBuildsAPI.getBinary.mockResolvedValueOnce({
 			url: `https://example.com/${buildId}/${buildId}.bin?X-Amz-Signature=abc`,
@@ -441,7 +489,7 @@ describe("builds CLI", () => {
 		expect(writeBinary).toHaveBeenCalledWith(path.resolve("tmp"), `${buildId}.bin`, expect.any(Buffer));
 	});
 
-	it("binary --filename still wins over the server name", async () => {
+	it("binary --filename still wins over the Signaloid Cloud Compute Engine name", async () => {
 		const buildId = "bld_0123456789abcdef0123456789abcdef";
 		(global.fetch as jest.Mock).mockResolvedValueOnce({
 			ok: true,

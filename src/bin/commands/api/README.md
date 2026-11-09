@@ -38,7 +38,7 @@ The Signaloid CLI provides a comprehensive command-line interface for interactin
 
 - **files.ts** - File management in cloud storage (list, upload, download, stat, delete)
 - **buckets.ts** - S3-compatible bucket management (list, create, update, delete)
-- **drives.ts** - Virtual drive management (connect data sources like buckets and gateways)
+- **drives.ts** - Virtual drive management (connect data sources like buckets)
 
 ### Integration
 

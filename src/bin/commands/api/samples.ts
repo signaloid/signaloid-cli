@@ -2,11 +2,12 @@ import { Command } from "commander";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
-import { loadJsonIfPath } from "../../utils/params";
+import { loadUxPayloadFile } from "../../utils/params";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { OutputFormat } from "../../utils/output";
 import { printData } from "../../utils/verbosity";
+import { parsePositiveInt } from "../../utils/validation";
 
 /**
  * Registers the 'samples' command and subcommands for retrieving statistical samples.
@@ -34,7 +35,7 @@ export default function samples(program: Command) {
 		.description("Get samples from a Reference Core task using output Value IDs")
 		.requiredOption("--task-id <id>", "Task ID")
 		.requiredOption("--value-id <id>", "Value ID")
-		.option("--count <n>", "Number of samples", (v) => parseInt(v, 10))
+		.option("--count <n>", "Number of samples", parsePositiveInt)
 		.option("--continuation-token <token>", "Pagination continuation token")
 		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
@@ -70,7 +71,7 @@ export default function samples(program: Command) {
 		.description("Get samples from Ux strings")
 		.option("--ux-string <ux-string>", "Ux string")
 		.option("--file <json>", "JSON file with Ux string")
-		.option("--count <n>", "Number of samples", (v) => parseInt(v, 10))
+		.option("--count <n>", "Number of samples", parsePositiveInt)
 		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const spinner = createSpinner("Fetching samples from Ux string...");
@@ -81,8 +82,8 @@ export default function samples(program: Command) {
 				const client = makeClient(await loadConfig());
 				let res;
 				if (opts.file) {
-					const payload = await loadJsonIfPath(opts.file);
-					res = await client.samples.getSamplesFromUx(payload as any, opts.count);
+					const payload = await loadUxPayloadFile(opts.file, { uxStringOnly: true });
+					res = await client.samples.getSamplesFromUx(payload, opts.count);
 				} else {
 					const raw = opts.uxString;
 					res = await client.samples.getSamplesFromUx(raw, opts.count);

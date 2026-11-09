@@ -49,6 +49,7 @@ jest.mock("../../utils/sdk", () => {
 });
 
 import filesCmd from "./files";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockFilesAPI } = jest.requireMock("../../utils/sdk");
 const { toBuffer } = jest.requireMock("../../utils/binary");
 const { ensureDir, writeBinary } = jest.requireMock("../../utils/fsx");
@@ -103,7 +104,7 @@ describe("files CLI", () => {
 	});
 
 	it("download saves to default dir/name", async () => {
-		// Current implementation JSON.parses the result of get(); provide an object without download_url
+		// Current implementation JSON.parses the result of get(); provide an object without DownloadURL
 		// so it falls into the toBuffer() path
 		mockFilesAPI.get.mockResolvedValueOnce(JSON.stringify({ name: "file.txt" }));
 		mockToBuffer.mockResolvedValueOnce(Buffer.from("DATA"));
@@ -116,7 +117,7 @@ describe("files CLI", () => {
 	});
 
 	it("download honors --out and --name", async () => {
-		// Current implementation JSON.parses the result of get(); provide an object without download_url
+		// Current implementation JSON.parses the result of get(); provide an object without DownloadURL
 		// so it falls into the toBuffer() path
 		mockFilesAPI.get.mockResolvedValueOnce(JSON.stringify({ name: "c.bin" }));
 		mockToBuffer.mockResolvedValueOnce(Buffer.from("Z"));
@@ -186,16 +187,31 @@ describe("files CLI", () => {
 		expect(process.exitCode).toBe(2);
 	});
 
-	it("ls --count follows nextContinuationToken and prints ContinuationKey", async () => {
+	it("ls --count follows Pagination.Links.Next and prints where to resume", async () => {
 		mockFilesAPI.list
-			.mockResolvedValueOnce({ items: [{ path: "a" }, { path: "b" }], nextContinuationToken: "t1" })
-			.mockResolvedValueOnce({ items: [{ path: "c" }], nextContinuationToken: "t2" });
+			.mockResolvedValueOnce({
+				Count: 2,
+				Files: [{ Path: "a" }, { Path: "b" }],
+				Pagination: paginationBlock("t1", 3),
+			})
+			.mockResolvedValueOnce({ Count: 1, Files: [{ Path: "c" }], Pagination: paginationBlock("t2", 3) });
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "files", "ls", "--path", "d/", "--count", "3"]);
-		expect(mockFilesAPI.list).toHaveBeenNthCalledWith(2, { path: "d/", startKey: "t1" });
+		expect(mockFilesAPI.list).toHaveBeenNthCalledWith(1, { path: "d/", limit: 3 });
+		expect(mockFilesAPI.list).toHaveBeenNthCalledWith(2, { path: "d/", cursor: "t1", limit: 1 });
 		const output = JSON.parse(logs[logs.length - 1]);
 		expect(output.Files).toHaveLength(3);
-		expect(output.ContinuationKey).toBe("t2");
+		expect(output.Cursor).toBe("t2");
+	});
+
+	it("ls --count follows ContinuationKey against an API without Pagination", async () => {
+		mockFilesAPI.list
+			.mockResolvedValueOnce({ Count: 2, Files: [{ Path: "a" }, { Path: "b" }], ContinuationKey: "k1" })
+			.mockResolvedValueOnce({ Count: 1, Files: [{ Path: "c" }] });
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "files", "ls", "--count", "3"]);
+		expect(mockFilesAPI.list).toHaveBeenNthCalledWith(2, { path: undefined, startKey: "k1", limit: 1 });
+		expect(JSON.parse(logs[logs.length - 1]).Files).toHaveLength(3);
 	});
 
 	it("mkdir creates directory", async () => {

@@ -16,6 +16,7 @@ For information on these features, see the [Signaloid CLI developer documentatio
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Command Reference](#command-reference)
+  - [Paginated listings](#paginated-listings)
   - [auth](#auth)
   - [builds](#builds)
   - [buckets](#buckets)
@@ -86,6 +87,20 @@ signaloid-cli tasks list
 
 ## Command Reference
 
+### Paginated listings
+
+The `list` commands of builds, buckets, drives, files, keys, repos, tasks and webhooks, and `builds tasks`, `builds variables`, `repos builds`, `organizations users list`, `organizations invitations` and `users logs`, read a listing one page at a time:
+
+- Without `--count`, they fetch one page. With `--count <n>`, they fetch `<n>` items, across pages. With `--status`, builds and tasks fetch whole pages, since the status filter applies after the page is read, so the output can hold more. An older Signaloid Cloud Compute Engine without `Pagination` can also return whole pages.
+- The JSON output has the items, then their `Count`. When more items are available, it ends with `Cursor`. Pass it as `--cursor` to continue where the output stopped, with the same filters as before. Only `--limit` and `--count` may change. The cursor is an opaque string: do not parse, build or change it.
+- On a successful response, the listing has ended when the output has neither `Cursor` nor `ContinuationKey`. Do not stop on a short or empty output, as it can still have a resume token.
+- With `--format table`, the cursor is not in the table. When more items are available, the command prints `More items: --cursor <cursor>` on stderr after the table, or `--start-key <key>` for an older Signaloid Cloud Compute Engine. On the last page, it prints nothing there.
+- **Changed in this version:** `keys list`, `webhooks list` and `organizations invitations` used to print every item, and `organizations users list` the active members and the pending users together. They now fetch one page, like the other listings. `organizations users list` shows the active members, or the pending users with `--status Pending`. To read every item, pass `--count` with a number at least as large as the listing.
+- If the Signaloid Cloud Compute Engine stops advancing a listing, the command prints the items read so far, with no `Cursor`, and exits with an error.
+- `--limit <n>` sets the number of items per request. The Signaloid Cloud Compute Engine caps it per listing.
+- `--start-key` and the output's `ContinuationKey` still work where a listing had them, but are deprecated. `repos list`, keys, webhooks, organization users and invitations, and logs never had them. Pass `ContinuationKey` only as `--start-key`, and `Cursor` only as `--cursor`. The two options cannot be used together. The `--start` option of earlier versions is now `--cursor`.
+- An older Signaloid Cloud Compute Engine without `Pagination` does not take `--cursor`. Rather than show the first page again, the command then stops with an error. Pass the `ContinuationKey` of the previous output as `--start-key` instead.
+
 [↑ Top](#signaloid-cli)
 
 ---
@@ -154,7 +169,7 @@ Manage builds. **Aliases:** `b`, `build`
 Show information about your builds.
 
 ```
-signaloid-cli builds list [--status <status>] [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--summary] [--start-key <key>] [--format <table|json>] [--columns <cols>]
+signaloid-cli builds list [--status <status>] [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--summary] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 | Option | Description |
@@ -162,10 +177,11 @@ signaloid-cli builds list [--status <status>] [--from <iso>] [--to <iso>] [--cou
 | `--status <status>` | Filter by status: `Accepted` \| `Initialising` \| `In Progress` \| `Completed` \| `Cancelled` \| `Stopped` \| `Rescheduled` |
 | `--from <iso>` | Filter to builds created after this ISO 8601 timestamp (e.g. `2025-01-01T00:00:00Z`) |
 | `--to <iso>` | Filter to builds created before this ISO 8601 timestamp |
-| `--count <n>` | Number of items to fetch |
-| `--limit <n>` | Server-side page size limit (max 25 in expanded mode, 500 with `--summary`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Builds per request, at most 25 (500 with `--summary`) |
 | `--summary` | Return lightweight build summaries (`{BuildID, Owner, CreatedAt}`) instead of full details. Allows a much larger page size. |
-| `--start-key <key>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
 | `--format <table\|json>` | Output format (default: `json`) |
 | `--columns <cols>` | Comma-separated list of column keys to display, or `help` to list available columns |
 
@@ -197,7 +213,7 @@ signaloid-cli builds create:source --file <path> --lang <lang> [--args <args>] [
 | `--args <args>` | Default runtime arguments |
 | `--core-id <id>` | Core ID to use for the build |
 | `--trace-variables <json>` | Not supported on `r7i` cores. JSON array of `TraceVariableRequest` objects, e.g., `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
-| `--data-sources <json>` | JSON array of `DataSource` objects, e.g. `'[{"Location":"/data","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
+| `--data-sources <json>` | JSON array of `DataSource` objects, for example `'[{"Location":"data","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
 | `--public` | Mark the build as publicly accessible (sets `IsPublic=true`) |
 | `--discover-variables` | Request SCCE to discover traceable variables (sets `DiscoverVariables=true` query param). Not supported on `r7i` cores. |
 | `--config-mk <path>` | Path to a `config.mk` file |
@@ -217,7 +233,7 @@ signaloid-cli builds create:repo --repo-id <id> [--args <args>] [--core-id <id>]
 | `--core-id <id>` | Core ID to use for the build |
 | `--discover-vars` | Request SCCE to discover output variables. Not supported on `r7i` cores. A build on an `r7i` core ignores the trace variables stored on the repository. |
 | `--trace-variables <json>` | Not supported on `r7i` cores. JSON array of `TraceVariable` objects, e.g., `'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]'` |
-| `--data-sources <json>` | JSON array of `DataSource` objects, e.g. `'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
+| `--data-sources <json>` | JSON array of `DataSource` objects, for example `'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
 | `--public` | Mark the resulting build as public |
 | `--private` | Mark the resulting build as private (default) |
 
@@ -282,20 +298,23 @@ signaloid-cli builds update --build-id <id> {--public | --private}
 List the output variables discovered for a build.
 
 ```
-signaloid-cli builds variables --build-id <id> [--start-key <key>]
+signaloid-cli builds variables --build-id <id> [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--build-id <id>` | Build ID |
-| `--start-key <key>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
 
 #### `builds tasks`
 
 List tasks that were run for a specific build.
 
 ```
-signaloid-cli builds tasks --build-id <id> [--from <iso>] [--to <iso>] [--start-key <key>]
+signaloid-cli builds tasks --build-id <id> [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
 
 | Option | Description |
@@ -303,7 +322,10 @@ signaloid-cli builds tasks --build-id <id> [--from <iso>] [--to <iso>] [--start-
 | `--build-id <id>` | Build ID |
 | `--from <iso>` | Filter to tasks created after this ISO 8601 timestamp |
 | `--to <iso>` | Filter to tasks created before this ISO 8601 timestamp |
-| `--start-key <key>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
+| `--limit <n>` | Items per request, at most 100 (default 25) |
 
 #### `builds binary`
 
@@ -351,13 +373,15 @@ Manage cloud storage buckets. **Alias:** `bkt`
 Show information about your cloud storage buckets.
 
 ```
-signaloid-cli buckets list [--count <n>] [--start-key <key>] [--format <table|json>] [--columns <cols>]
+signaloid-cli buckets list [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--count <n>` | Number of items to fetch |
-| `--start-key <key>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 25) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
 | `--format <table\|json>` | Output format (default: `json`) |
 | `--columns <cols>` | Comma-separated list of column keys to display, or `help` to list available columns |
 
@@ -374,24 +398,24 @@ signaloid-cli buckets get --bucket-id <id> [--format <table|json>]
 Create a new bucket.
 
 ```
-signaloid-cli buckets create --name <name> --account <account> [--region <region>] [--mount-path <path>] [--read] [--write]
+signaloid-cli buckets create --name <name> --account <account> [--read] [--write]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--name <name>` | Bucket name |
 | `--account <account>` | Account identifier |
-| `--region <region>` | Cloud region (e.g. `us-east-1`) |
-| `--mount-path <path>` | Mount path |
 | `--read` | Enable read access |
 | `--write` | Enable write access |
+
+A bucket has no mount path. Where it is mounted is the `Location` of each data source that uses it.
 
 #### `buckets update`
 
 Update information about the bucket. Only the specified options are updated; all others remain unchanged.
 
 ```
-signaloid-cli buckets update --bucket-id <id> [--name <name>] [--account <account>] [--region <region>] [--mount-path <path>] [--read | --no-read] [--write | --no-write]
+signaloid-cli buckets update --bucket-id <id> [--name <name>] [--account <account>] [--read | --no-read] [--write | --no-write]
 ```
 
 #### `buckets delete`
@@ -468,13 +492,13 @@ signaloid-cli cores create --name <name> --class <class> [--precision <n>] [--me
 | `--name <name>` | Core name |
 | `--class <class>` | Core class: `C0Pro` \| `r7i` \| `C0-microSD` \| `C0-microSD-plus` \| `C0-SD` |
 | `--precision <n>` | Precision (integer). Required except for the `r7i` class and the `Bypass` microarchitecture, whose precision is always `0`. Leave it out for them, or pass `0`. |
-| `--memory <n>` | Deprecated and optional. The server sets the memory size from the core class. |
-| `--microarchitecture <arch>` | `Athens` \| `Rome` \| `Bypass` \| `Reference` \| `Jupiter` \| `Native`. The `r7i` class takes only `Native`, and `Native` works with no other class. |
+| `--memory <n>` | Deprecated and optional. The Signaloid Cloud Compute Engine sets the memory size from the core class. |
+| `--microarchitecture <arch>` | `Athens` \| `Rome` \| `Bypass` \| `Reference` \| `Jupiter` \| `Mercury` \| `Europa` \| `Native`. `Jupiter`, `Mercury` and `Europa` are for the `C0Pro` class only, and the Free tier does not include `Mercury` or `Europa`. The `r7i` class takes only `Native`, and `Native` works with no other class. |
 | `--dependency-tracking <mode>` | `None` \| `Basic` \| `Advanced`. Required except for the `r7i` class and the `Bypass` microarchitecture, whose dependency tracking is always `None`. Leave it out for them, or pass `None`. |
 
 #### `cores update`
 
-Update information about the specified custom core. Only the specified options are updated. All others remain unchanged. Note that you cannot update properties of the default cores. A core that still has the retired `C0` class must be updated with `--class` (for example `C0Pro`, which replaced it), and one that still has the retired `Atlas` microarchitecture must be updated with `--microarchitecture` (for example `Rome`, which replaced it). Without `--dependency-tracking`, the stored mode is kept if the microarchitecture accepts it. An older core that has only the legacy correlation tracking is migrated: `Autocorrelation` becomes `Basic` and `Disable` becomes `None`. If the microarchitecture accepts only one mode (`Advanced` for `Jupiter`, `None` for `Bypass` and `Reference`), that mode is used instead. Otherwise, pass `--dependency-tracking`. Changing a core to `r7i` sets its microarchitecture to `Native` and drops its precision and dependency tracking (and refuses a `--microarchitecture` other than `Native`, a `--precision` other than `0`, or a `--dependency-tracking` other than `None`). Changing an `r7i` core to another class needs `--microarchitecture`. A `Bypass` core always has a precision of `0` and a dependency tracking of `None`, so changing a core to `Bypass` sets them, and `--precision` and `--dependency-tracking` must be left out or be `0` and `None`. Changing an `r7i` or `Bypass` core to a microarchitecture that takes a precision needs `--precision`.
+Update information about the specified custom core. Only the specified options are updated. All others remain unchanged. Note that you cannot update properties of the default cores. A core that still has the retired `C0` class must be updated with `--class` (for example `C0Pro`, which replaced it), and one that still has the retired `Atlas` microarchitecture must be updated with `--microarchitecture` (for example `Rome`, which replaced it). Without `--dependency-tracking`, the stored mode is kept if the microarchitecture accepts it. An older core that has only the legacy correlation tracking is migrated: `Autocorrelation` becomes `Basic` and `Disable` becomes `None`. If the microarchitecture accepts only one mode (`Advanced` for `Jupiter`, `Mercury` and `Europa`, `None` for `Bypass` and `Reference`), that mode is used instead. Otherwise, pass `--dependency-tracking`. Changing a core to `r7i` sets its microarchitecture to `Native` and drops its precision and dependency tracking (and refuses a `--microarchitecture` other than `Native`, a `--precision` other than `0`, or a `--dependency-tracking` other than `None`). Changing an `r7i` core to another class needs `--microarchitecture`. A `Bypass` core always has a precision of `0` and a dependency tracking of `None`, so changing a core to `Bypass` sets them, and `--precision` and `--dependency-tracking` must be left out or be `0` and `None`. Changing an `r7i` or `Bypass` core to a microarchitecture that takes a precision needs `--precision`.
 
 ```
 signaloid-cli cores update --core-id <id> [--name <name>] [--class <class>] [--precision <n>] [--memory <n>] [--microarchitecture <arch>] [--dependency-tracking <mode>]
@@ -501,7 +525,7 @@ Manage virtual data drives.
 Display information about your virtual data drives.
 
 ```
-signaloid-cli drives list [--count <n>] [--start-key <key>] [--format <table|json>] [--columns <cols>]
+signaloid-cli drives list [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 #### `drives get`
@@ -529,21 +553,21 @@ DataSource JSON format:
 {
   "ResourceID": "bkt_123",
   "ResourceType": "Bucket",
-  "Location": "/"
+  "Location": "data"
 }
 ```
 
-`ResourceType` must be one of: `Gateway` | `Bucket` | `SignaloidCloudStorage`
+`ResourceType` must be one of: `Bucket` | `SignaloidCloudStorage`. `Location` must be a relative path, such as `data`.
 
 ```sh
 # Single inline DataSource
 signaloid-cli drives create --name MyDrive \
-  --ds '{"ResourceID":"bkt_123","ResourceType":"Bucket","Location":"/"}'
+  --ds '{"ResourceID":"bkt_123","ResourceType":"Bucket","Location":"data"}'
 
 # Multiple DataSources
 signaloid-cli drives create --name MyDrive \
-  --ds '{"ResourceID":"bkt_1","ResourceType":"Bucket","Location":"/"}' \
-  --ds '{"ResourceID":"bkt_2","ResourceType":"Bucket","Location":"/data"}'
+  --ds '{"ResourceID":"bkt_1","ResourceType":"Bucket","Location":"data"}' \
+  --ds '{"ResourceID":"bkt_2","ResourceType":"Bucket","Location":"data2"}'
 
 # DataSources from file
 signaloid-cli drives create --name MyDrive --ds-file ./datasources.json
@@ -580,14 +604,16 @@ Manage files and directories stored in Signaloid Cloud Storage. **Alias:** `f`
 Show information about files and directories. 
 
 ```
-signaloid-cli files list [--path <dir>] [--count <n>] [--start-key <token>] [--format <table|json>] [--columns <cols>]
+signaloid-cli files list [--path <dir>] [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--path <dir>` | Directory path to list (e.g. `datasets/`). Defaults to root. |
-| `--count <n>` | Number of items to fetch |
-| `--start-key <token>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Files per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
 | `--format <table\|json>` | Output format (default: `json`) |
 | `--columns <cols>` | Comma-separated list of column keys to display, or `help` to list available columns |
 
@@ -766,8 +792,14 @@ Manage your Signaloid Cloud Compute Engine API keys. **Alias:** `k`
 Display information about your API keys.
 
 ```
-signaloid-cli keys list [--count <n>] [--format <table|json>] [--columns <cols>]
+signaloid-cli keys list [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
 
 #### `keys create`
 
@@ -842,11 +874,19 @@ signaloid-cli organizations create --name <name> [--dedicated-instance <name>]
 
 #### `organizations users list`
 
-List all users belonging to the specified organization.
+List the active members of the specified organization, or its pending invitations with `--status Pending`. Each list is paged on its own.
 
 ```
-signaloid-cli organizations users list --org-id <id>
+signaloid-cli organizations users list --org-id <id> [--status <Active|Pending>] [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--org-id <id>` | Organization ID |
+| `--status <Active\|Pending>` | Which list to show: `Active` members (default) or `Pending` invitations |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same `--status` |
 
 #### `organizations users invite`
 
@@ -894,8 +934,14 @@ signaloid-cli organizations users remove --org-id <id> --identifier <id-or-email
 List pending organization invitations for the current user.
 
 ```
-signaloid-cli organizations invitations
+signaloid-cli organizations invitations [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
 
 [↑ Top](#signaloid-cli)
 
@@ -916,7 +962,7 @@ signaloid-cli plot ux-string {--ux-string <ux> | --file <json>} [--out <dir>] [-
 | Option | Description |
 |--------|-------------|
 | `--ux-string <ux>` | Ux string value to plot |
-| `--file <json>` | JSON payload file containing a Ux string |
+| `--file <json>` | JSON file whose `Payload` field is a Ux string or a list of numeric samples, for example `{"Payload": "1.0Ux..."}` |
 | `--out <dir>` | Directory to save the output image |
 | `--out-file <path>` | Full output file path (only valid with `--ux-string`) |
 
@@ -951,7 +997,7 @@ Connect and manage code repositories. **Aliases:** `r`, `repo`
 Display information about your connected repositories.
 
 ```
-signaloid-cli repos list [--count <n>] [--format <table|json>] [--columns <cols>]
+signaloid-cli repos list [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 #### `repos get`
@@ -1008,7 +1054,7 @@ signaloid-cli repos update --repo-id <id> [--branch <name>] [--commit <sha>] [--
 List builds for a specific repository.
 
 ```
-signaloid-cli repos builds --repo-id <id> [--from <iso>] [--to <iso>] [--count <n>] [--start-key <key>]
+signaloid-cli repos builds --repo-id <id> [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
 
 #### `repos disconnect`
@@ -1053,7 +1099,7 @@ signaloid-cli samples from-ux-string {--ux-string <ux> | --file <json>} [--count
 | Option | Description |
 |--------|-------------|
 | `--ux-string <ux>` | Ux string value |
-| `--file <json>` | JSON file containing a Ux string |
+| `--file <json>` | JSON file whose `Payload` field is a Ux string, for example `{"Payload": "1.0Ux..."}` |
 | `--count <n>` | Number of samples to return |
 | `--format <table\|json>` | Output format (default: `json`) |
 
@@ -1102,7 +1148,7 @@ Display information about your tasks. You can also display information about tas
 Display information about your tasks.
 
 ```
-signaloid-cli tasks list [--status <status>] [--from <iso>] [--to <iso>] [--count <n>] [--start-key <key>] [--format <table|json>] [--columns <cols>]
+signaloid-cli tasks list [--status <status>] [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--summary] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
 
 | Option | Description |
@@ -1110,8 +1156,11 @@ signaloid-cli tasks list [--status <status>] [--from <iso>] [--to <iso>] [--coun
 | `--status <status>` | Filter by status: `Accepted` \| `Initialising` \| `In Progress` \| `Completed` \| `Cancelled` \| `Stopped` |
 | `--from <iso>` | Filter to tasks created after this ISO 8601 timestamp |
 | `--to <iso>` | Filter to tasks created before this ISO 8601 timestamp |
-| `--count <n>` | Number of items to fetch |
-| `--start-key <key>` | Pagination cursor token (from a previous response's `ContinuationKey`) |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Tasks per request, at most 25 (500 with `--summary`) |
+| `--summary` | Return summary rows (`{TaskID, Owner, CreatedAt}`) instead of expanded tasks. Allows a much larger page size. |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
+| `--start-key <key>` | Deprecated, use `--cursor`. Resume from the `ContinuationKey` of the previous output. |
 | `--format <table\|json>` | Output format (default: `json`) |
 | `--columns <cols>` | Comma-separated list of column keys to display, or `help` to list available columns |
 
@@ -1245,11 +1294,19 @@ signaloid-cli users update --clear-industry
 
 #### `users logs`
 
-Fetch activity logs for the current user.
+Fetch activity logs for the current user, newest first.
 
 ```
-signaloid-cli users logs [--from <iso>] [--to <iso>] [--count <n>] [--format <table|json>]
+signaloid-cli users logs [--from <iso>] [--to <iso>] [--count <n>] [--limit <n>] [--cursor <cursor>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--from <iso>` | Start of the time window |
+| `--to <iso>` | End of the time window |
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 10000 (default 100) |
+| `--cursor <cursor>` | Resume from the `Cursor` value of the previous output, with the same `--from` and `--to`. It continues with older entries. |
 
 #### `users logout-all`
 
@@ -1272,8 +1329,14 @@ Manage webhook endpoints.
 Display information about your configured webhooks.
 
 ```
-signaloid-cli webhooks list [--format <table|json>] [--columns <cols>]
+signaloid-cli webhooks list [--count <n>] [--limit <n>] [--cursor <cursor>] [--format <table|json>] [--columns <cols>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--count <n>` | Number of items to fetch, across pages. The output's `Cursor` resumes after the last one. |
+| `--limit <n>` | Items per request, at most 100 (default 100) |
+| `--cursor <cursor>` | Resume a listing from the `Cursor` value of the previous output, with the same filters |
 
 #### `webhooks get`
 
@@ -1293,12 +1356,14 @@ signaloid-cli webhooks create --url <url> [--events <e1,e2,...>] [--description 
 
 | Option | Description |
 |--------|-------------|
-| `--url <url>` | Target URL to receive webhook payloads |
-| `--events <e1,e2,...>` | Comma-separated event list (e.g., `TaskStatusChange,BuildComplete`) |
+| `--url <url>` | Target `https` URL to receive webhook payloads. It must not point to a private or internal address. |
+| `--events <e1,e2,...>` | Comma-separated event list: `task-status`, `build-status`, `task-stats`, `build-stats`, `task-count`, `build-count` |
 | `--description <text>` | Human-readable description |
 | `--status <active\|disabled>` | Initial status (default: `active`) |
-| `--payload-file <json>` | JSON file with additional fields to merge into the request |
+| `--payload-file <json>` | JSON file with additional fields to merge into the request. Field names are PascalCase, such as `Description`. |
 | `--format <table\|json>` | Output format (default: `json`) |
+
+The output includes the webhook's signing `Secret`. Keep it, because no other command or request returns it again.
 
 #### `webhooks update`
 

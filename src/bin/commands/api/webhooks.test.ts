@@ -20,14 +20,14 @@ jest.mock("../../utils/params", () => ({
 
 jest.mock("../../utils/sdk", () => {
 	const webhooks = {
-		list: jest.fn().mockResolvedValue([{ webhookId: "w1" }]),
-		getOne: jest.fn().mockResolvedValue({ webhookId: "w1", status: "active" }),
-		create: jest.fn().mockResolvedValue({ webhookId: "w-new" }),
-		update: jest.fn().mockResolvedValue({ webhookId: "w-new", status: "disabled" }),
+		list: jest.fn().mockResolvedValue({ Webhooks: [{ WebhookID: "w1" }], Count: 1 }),
+		getOne: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "active" }),
+		create: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "active", Secret: "whsec_x" }),
+		update: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "disabled" }),
 		delete: jest.fn().mockResolvedValue({ ok: true }),
 		getStats: jest.fn().mockResolvedValue({ count: 1 }),
-		enable: jest.fn().mockResolvedValue({ webhookId: "w1", status: "active" }),
-		disable: jest.fn().mockResolvedValue({ webhookId: "w1", status: "disabled" }),
+		enable: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "active" }),
+		disable: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "disabled" }),
 	};
 	return {
 		__esModule: true,
@@ -39,7 +39,7 @@ jest.mock("../../utils/sdk", () => {
 import webhooksCmd from "./webhooks";
 const { mockWebhooksAPI } = jest.requireMock("../../utils/sdk");
 
-jest.spyOn(console, "log").mockImplementation(() => {});
+const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
 jest.spyOn(console, "error").mockImplementation(() => {});
 let exitCode: number | undefined;
 jest.spyOn(process, "exit").mockImplementation(((code?: number) => {
@@ -54,6 +54,10 @@ const makeProgram = () => {
 	webhooksCmd(program);
 	return program;
 };
+
+// Runs `webhooks create` with a valid URL, followed by the given arguments.
+const runCreate = (...args: string[]) =>
+	makeProgram().parseAsync(["node", "x", "webhooks", "create", "--url", "https://x/h", ...args]);
 
 describe("webhooks CLI", () => {
 	beforeEach(() => {
@@ -74,8 +78,8 @@ describe("webhooks CLI", () => {
 		expect(mockWebhooksAPI.getOne).toHaveBeenCalledWith("wid-1");
 	});
 
-	it("create merges payload-file and then updates status", async () => {
-		mockLoadJsonIfPath.mockResolvedValueOnce({ description: "extra", other: 1 });
+	it("create merges payload-file and then updates status, keeping the Secret", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce({ Description: "extra", other: 1 });
 		const program = makeProgram();
 		await program.parseAsync([
 			"node",
@@ -85,27 +89,73 @@ describe("webhooks CLI", () => {
 			"--url",
 			"https://example.com/hook",
 			"--events",
-			"a,b,c",
+			"task-status,build-status,task-count",
 			"--status",
 			"disabled",
 			"--payload-file",
 			"extra.json",
 		]);
 		expect(mockWebhooksAPI.create).toHaveBeenCalledWith({
-			url: "https://example.com/hook",
-			events: ["a", "b", "c"],
-			description: "extra", // ← changed from undefined
+			URL: "https://example.com/hook",
+			Events: ["task-status", "build-status", "task-count"],
+			Description: "extra",
 			other: 1,
 		});
-		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("w-new", { status: "disabled" });
+		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("w-new", { Status: "disabled" });
+		expect(JSON.parse(logSpy.mock.calls.at(-1)![0])).toEqual({
+			WebhookID: "w-new",
+			Status: "disabled",
+			Secret: "whsec_x",
+		});
 	});
 
-	it("create without status fetches details via getOne", async () => {
+	it("create without status prints the create response, Secret included", async () => {
 		mockLoadJsonIfPath.mockResolvedValueOnce(undefined);
-		const program = makeProgram();
-		await program.parseAsync(["node", "x", "webhooks", "create", "--url", "https://x/h", "--events", "push"]);
+		await runCreate("--events", "task-status");
 		expect(mockWebhooksAPI.create).toHaveBeenCalled();
-		expect(mockWebhooksAPI.getOne).toHaveBeenCalledWith("w-new");
+		expect(mockWebhooksAPI.getOne).not.toHaveBeenCalled();
+		expect(mockWebhooksAPI.update).not.toHaveBeenCalled();
+		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("whsec_x");
+	});
+
+	it("create refuses an unknown event before creating anything", async () => {
+		await expect(runCreate("--events", "TaskStatusChange")).rejects.toThrow(/EXIT/);
+		expect(mockWebhooksAPI.create).not.toHaveBeenCalled();
+	});
+
+	it("create requires --events", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce(undefined);
+		await expect(runCreate()).rejects.toThrow(/EXIT/);
+		expect(mockWebhooksAPI.create).not.toHaveBeenCalled();
+	});
+
+	it("create refuses an invalid --status before creating anything", async () => {
+		await expect(runCreate("--events", "task-status", "--status", "paused")).rejects.toThrow(/EXIT/);
+		expect(mockWebhooksAPI.create).not.toHaveBeenCalled();
+	});
+
+	it("create prints the Secret even when the status update fails", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce(undefined);
+		mockWebhooksAPI.update.mockRejectedValueOnce(new Error("503"));
+		await expect(runCreate("--events", "task-status", "--status", "disabled")).rejects.toThrow(/EXIT/);
+		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("whsec_x");
+	});
+
+	it("refuses a payload file with the old lowercase fields", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce({ events: ["task-status"] });
+		const program = makeProgram();
+		await expect(
+			program.parseAsync([
+				"node",
+				"x",
+				"webhooks",
+				"update",
+				"--webhook-id",
+				"wid-7",
+				"--payload-file",
+				"old.json",
+			]),
+		).rejects.toThrow(/EXIT/);
 		expect(mockWebhooksAPI.update).not.toHaveBeenCalled();
 	});
 
@@ -122,30 +172,30 @@ describe("webhooks CLI", () => {
 			"--url",
 			"https://new",
 			"--events",
-			"x,y",
+			"task-stats,build-stats",
 			"--description",
 			"d",
 			"--status",
 			"active",
 		]);
 		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-2", {
-			url: "https://new",
-			events: ["x", "y"],
-			description: "d",
-			status: "active",
+			URL: "https://new",
+			Events: ["task-stats", "build-stats"],
+			Description: "d",
+			Status: "active",
 		});
 	});
 
 	it("update status via --active", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "webhooks", "update", "--webhook-id", "wid-3", "--active"]);
-		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-3", { status: "active" });
+		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-3", { Status: "active" });
 	});
 
 	it("update status via --disabled", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "webhooks", "update", "--webhook-id", "wid-4", "--disabled"]);
-		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-4", { status: "disabled" });
+		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-4", { Status: "disabled" });
 	});
 
 	it("update merges payload-file", async () => {
@@ -165,7 +215,7 @@ describe("webhooks CLI", () => {
 		]);
 		expect(mockLoadJsonIfPath).toHaveBeenCalledWith("p.json");
 		expect(mockWebhooksAPI.update).toHaveBeenCalledWith("wid-5", {
-			url: "https://u",
+			URL: "https://u",
 			headers: { k: "v" },
 		});
 	});
