@@ -5,10 +5,14 @@ import { addLearnMore, useGhStyleHelp } from "../../utils/help-formatter";
 import {
 	createCustomTable,
 	displayResource,
+	finishListingSpinner,
 	fetchWithPagination,
+	printListing,
+	printListingTable,
 	OutputFormat,
 	parseColumns,
 	showAvailableColumns,
+	addPaginationOptions,
 } from "../../utils/output";
 import { makeClient } from "../../utils/sdk";
 import { createSpinner } from "../../utils/spinner";
@@ -48,9 +52,8 @@ export default function repos(program: Command) {
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
 	// signaloid-cli repos list
-	cmd.command("list")
+	addPaginationOptions(cmd.command("list"), { startKey: false })
 		.description("List repositories")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -63,30 +66,22 @@ export default function repos(program: Command) {
 			const spinner = createSpinner("Fetching repositories...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
 				const result = await fetchWithPagination<any>(
-					async (startKey) => {
-						const res = await client.repositories.list(startKey);
-						return res as any;
-					},
+					(query) => client.repositories.list(query),
 					"Repositories",
-					targetCount,
-					spinner,
+					// `repos list` has no --start-key, so its output has no ContinuationKey.
+					{ ...opts, continuationKey: false },
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Repositories: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					printData(JSON.stringify(output, null, 2));
+					printListing("Repositories", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("repos", result.items, selectedColumns));
+					printListingTable("repos", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list repositories");
@@ -167,7 +162,7 @@ export default function repos(program: Command) {
 		)
 		.option(
 			"--data-sources <json>",
-			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
+			'JSON array of DataSource objects, e.g. \'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
 		.action(async (opts) => {
 			const spinner = createSpinner("Connecting repository...");
@@ -257,7 +252,7 @@ export default function repos(program: Command) {
 		)
 		.option(
 			"--data-sources <json>",
-			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
+			'JSON array of DataSource objects, e.g. \'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
 		.option(
 			"--remove <field>",
@@ -306,9 +301,13 @@ export default function repos(program: Command) {
 					process.exit(EXIT_CODES.USAGE);
 				}
 
-				const res = await client.repositories.update(repoId, patch as any, {
-					remove: removeFields.length > 0 ? removeFields : undefined,
-				} as any);
+				const res = await client.repositories.update(
+					repoId,
+					patch as any,
+					{
+						remove: removeFields.length > 0 ? removeFields : undefined,
+					} as any,
+				);
 				spinner.succeed("Repository updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -335,36 +334,24 @@ export default function repos(program: Command) {
 			}
 		});
 
-	// signaloid-cli repos builds --repo-id <repoId> [--from <iso>] [--to <iso>] [--start-key <key>] [--count <n>]
-	cmd.command("builds")
+	// signaloid-cli repos builds --repo-id <repoId> [--from <iso>] [--to <iso>] [--cursor <cursor>] [--count <n>]
+	addPaginationOptions(cmd.command("builds"))
 		.description("List builds for a repository")
 		.requiredOption("--repo-id <id>", "Repo ID")
 		.option("--from <iso>", "From timestamp (ISO)")
 		.option("--to <iso>", "To timestamp (ISO)")
-		.option("--start-key <key>", "Pagination cursor token")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
 		.action(async (opts) => {
 			const repoId = String(opts.repoId);
 			const spinner = createSpinner("Fetching repository builds...");
 			try {
 				const client = makeClient(await loadConfig());
 				const result = await fetchWithPagination(
-					(startKey) =>
-						client.repositories.getBuilds(repoId, {
-							from: opts.from,
-							to: opts.to,
-							startKey: startKey || opts.startKey,
-						}),
+					(query) => client.repositories.getBuilds(repoId, { ...query, from: opts.from, to: opts.to }),
 					"Builds",
-					opts.count,
-					spinner,
+					opts,
 				);
-				spinner.succeed();
-				const output: any = { Builds: result.items };
-				if (result.continuationKey) {
-					output.ContinuationKey = result.continuationKey;
-				}
-				printData(JSON.stringify(output, null, 2));
+				finishListingSpinner(spinner, result);
+				printListing("Builds", result);
 			} catch (e: any) {
 				spinner.fail("Failed to list repository builds");
 				await handleCliError(e);

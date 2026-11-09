@@ -9,16 +9,22 @@ import { writeBinary } from "../../utils/fsx";
 import { resolveDownloadFilename } from "../../utils/download-filename";
 import { makeClient } from "../../utils/sdk";
 import {
-	displayResource,
-	OutputFormat,
+	addPaginationOptions,
 	createCustomTable,
+	displayResource,
+	finishListingSpinner,
+	fetchWithPagination,
+	limitHelp,
+	OutputFormat,
+	printListing,
+	printListingTable,
 	parseColumns,
 	showAvailableColumns,
-	fetchWithPagination,
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import { parsePositiveInt } from "../../utils/validation";
 import { usageError } from "../../utils/exit-codes";
 
 const TERMINAL_BUILD_STATES = new Set(["completed", "cancelled", "stopped"]);
@@ -57,21 +63,17 @@ export default function builds(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	// signaloid-cli builds list --status "Completed" --from 2025-09-01T00:00:00Z --to 2025-10-01T00:00:00Z --start-key sk_123 --count 20
-	cmd.command("list")
+	// signaloid-cli builds list --status "Completed" --from 2025-09-01T00:00:00Z --to 2025-10-01T00:00:00Z --cursor <cursor> --count 20
+	addPaginationOptions(cmd.command("list"), {
+		limitHelp: "Builds per request, at most 25 (500 with --summary)",
+		filtersAfterLimit: true,
+	})
 		.description("List builds")
-		.option("--start-key <key>", "Pagination cursor token")
 		.option("--from <iso>", "Filter: ISO start time")
 		.option("--to <iso>", "Filter: ISO end time")
 		.option(
 			"--status <status>",
 			'Filter by status (Accepted|Initialising|"In Progress"|Completed|Cancelled|Stopped|Rescheduled)',
-		)
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option(
-			"--limit <n>",
-			"Server-side page size limit (max 25 in expanded mode, 500 with --summary)",
-			(v) => parseInt(v, 10),
 		)
 		.option(
 			"--summary",
@@ -89,39 +91,26 @@ export default function builds(program: Command) {
 			const spinner = createSpinner("Fetching builds...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 				const summary = opts.summary === true;
 
 				const result = await fetchWithPagination(
-					(startKey) => {
-						const listOptions = {
-							startKey: startKey || opts.startKey,
-							from: opts.from,
-							to: opts.to,
-							status: opts.status,
-							...(opts.limit !== undefined ? { limit: opts.limit } : {}),
-						};
-						return summary
-							? client.builds.listSummary(listOptions)
-							: client.builds.list(listOptions);
+					(query) => {
+						const listOptions = { ...query, from: opts.from, to: opts.to, status: opts.status };
+						return summary ? client.builds.listSummary(listOptions) : client.builds.list(listOptions);
 					},
 					"Builds",
-					targetCount,
-					spinner,
+					// --status is applied after limit, so each request asks for a full page.
+					{ ...opts, filtersAfterLimit: Boolean(opts.status) },
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Builds: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					printData(JSON.stringify(output, null, 2));
+					printListing("Builds", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("builds", result.items, selectedColumns));
+					printListingTable("builds", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list builds");
@@ -142,7 +131,7 @@ export default function builds(program: Command) {
 		)
 		.option(
 			"--data-sources <json>",
-			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
+			'JSON array of DataSource objects, e.g. \'[{"Location":"data","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
 		.option("--public", "Mark the build as publicly accessible")
 		.option("--discover-variables", "Request the build to discover traceable variables (not on r7i cores)")
@@ -287,7 +276,7 @@ export default function builds(program: Command) {
 	cmd.command("watch")
 		.description("Wait for completion and print outputs")
 		.requiredOption("--build-id <id>", "Build ID")
-		.option("--timeout <sec>", "Timeout in seconds (default 60)", (v) => parseInt(v, 10))
+		.option("--timeout <sec>", "Timeout in seconds (default 60)", parsePositiveInt)
 		.action(async (opts) => {
 			const buildId = String(opts.buildId);
 			const spinner = createSpinner(`Waiting for build ${buildId}...`);
@@ -336,26 +325,18 @@ export default function builds(program: Command) {
 		.requiredOption("--repo-id <id>", "Repository ID")
 		.option("--args <args>", "Default runtime arguments")
 		.option("--core-id <coreId>", "Core ID")
-		.option(
-			"--discover-variables",
-			"Request the build to discover traceable variables (not on r7i cores)",
-			false,
-		)
-		.addOption(
-			new Option("--discover-vars", "Alias for --discover-variables").hideHelp(),
-		)
+		.option("--discover-variables", "Request the build to discover traceable variables (not on r7i cores)", false)
+		.addOption(new Option("--discover-vars", "Alias for --discover-variables").hideHelp())
 		.option(
 			"--trace-variables <json>",
 			'JSON array of TraceVariable objects (not on r7i cores), e.g. \'[{"Expression":"x[0]","File":"main.c","LineNumber":12}]\'',
 		)
 		.option(
 			"--data-sources <json>",
-			'JSON array of DataSource objects, e.g. \'[{"Location":"/data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
+			'JSON array of DataSource objects, e.g. \'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
 		.addOption(new Option("--public", "Mark the resulting build as public").conflicts("private"))
-		.addOption(
-			new Option("--private", "Mark the resulting build as private (default)").conflicts("public"),
-		)
+		.addOption(new Option("--private", "Mark the resulting build as private (default)").conflicts("public"))
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating repository build...");
 			try {
@@ -407,9 +388,7 @@ export default function builds(program: Command) {
 	cmd.command("update")
 		.description("Update build properties")
 		.requiredOption("--build-id <id>", "Build ID")
-		.addOption(
-			new Option("--visibility <value>", "Set build visibility").choices(["public", "private"]),
-		)
+		.addOption(new Option("--visibility <value>", "Set build visibility").choices(["public", "private"]))
 		.addOption(new Option("--public", "Make the build public").conflicts(["private", "visibility"]))
 		.addOption(new Option("--private", "Make the build private").conflicts(["public", "visibility"]))
 		.action(async (opts) => {
@@ -432,30 +411,32 @@ export default function builds(program: Command) {
 			}
 		});
 
-	// signaloid-cli builds variables --build-id <buildId> [--start-key sk_123]
-	cmd.command("variables")
+	// signaloid-cli builds variables --build-id <buildId> [--count <n>] [--limit <n>] [--cursor <cursor>]
+	addPaginationOptions(cmd.command("variables"), { limitHelp: limitHelp(100) })
 		.description("List variables for a build")
 		.requiredOption("--build-id <id>", "Build ID")
-		.option("--start-key <key>", "Pagination cursor token")
 		.action(async (opts) => {
 			const buildId = String(opts.buildId);
 			const spinner = createSpinner("Fetching build variables...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.builds.getVariables(buildId, opts.startKey);
-				spinner.succeed();
-				printData(JSON.stringify(res, null, 2));
+				const result = await fetchWithPagination(
+					(query) => client.builds.getVariables(buildId, query),
+					"Variables",
+					opts,
+				);
+				finishListingSpinner(spinner, result);
+				printListing("Variables", result, { BuildID: buildId });
 			} catch (e: any) {
 				spinner.fail("Failed to get build variables");
 				await handleCliError(e);
 			}
 		});
 
-	// signaloid-cli builds tasks --build-id <buildId> [--start-key sk_123] [--from iso] [--to iso]
-	cmd.command("tasks")
+	// signaloid-cli builds tasks --build-id <buildId> [--count <n>] [--limit <n>] [--cursor <cursor>] [--from <iso>] [--to <iso>]
+	addPaginationOptions(cmd.command("tasks"))
 		.description("List tasks for a build")
 		.requiredOption("--build-id <id>", "Build ID")
-		.option("--start-key <key>", "Pagination cursor token")
 		.option("--from <iso>", "Filter: ISO start time")
 		.option("--to <iso>", "Filter: ISO end time")
 		.action(async (opts) => {
@@ -463,13 +444,13 @@ export default function builds(program: Command) {
 			const spinner = createSpinner("Fetching build tasks...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.builds.listTasks(buildId, {
-					startKey: opts.startKey,
-					from: opts.from,
-					to: opts.to,
-				});
-				spinner.succeed();
-				printData(JSON.stringify(res, null, 2));
+				const result = await fetchWithPagination(
+					(query) => client.builds.listTasks(buildId, { ...query, from: opts.from, to: opts.to }),
+					"Tasks",
+					opts,
+				);
+				finishListingSpinner(spinner, result);
+				printListing("Tasks", result, { BuildID: buildId });
 			} catch (e: any) {
 				spinner.fail("Failed to list build tasks");
 				await handleCliError(e);
@@ -481,7 +462,10 @@ export default function builds(program: Command) {
 		.description("Get download URL for the build binary, or download it with --out")
 		.requiredOption("--build-id <id>", "Build ID")
 		.option("--out <dir>", "Directory to download the binary to")
-		.option("--filename <name>", "Override the saved filename (default: the name the server provides)")
+		.option(
+			"--filename <name>",
+			"Override the saved filename (default: the name the Signaloid Cloud Compute Engine provides)",
+		)
 		.option("--url-only", "Print only the presigned URL even when --out is set", false)
 		.action(async (opts) => {
 			const buildId = String(opts.buildId);

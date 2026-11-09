@@ -5,23 +5,73 @@ import { makeClient } from "../../utils/sdk";
 import { loadJsonIfPath } from "../../utils/params";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { OutputFormat, displayResource, createCustomTable, parseColumns, showAvailableColumns } from "../../utils/output";
+import {
+	addPaginationOptions,
+	createCustomTable,
+	displayResource,
+	finishListingSpinner,
+	fetchWithPagination,
+	limitHelp,
+	OutputFormat,
+	printListing,
+	printListingTable,
+	parseColumns,
+	showAvailableColumns,
+} from "../../utils/output";
 import { printData } from "../../utils/verbosity";
+import type {
+	CreateWebhookRequest,
+	CreateWebhookResponse,
+	UpdateWebhookRequest,
+	WebhookEventType,
+	WebhookStatus,
+} from "@signaloid/scce-sdk";
 
-function parseEvents(maybeCsv?: string): string[] | undefined {
+const WEBHOOK_EVENTS = Object.keys({
+	"task-status": true,
+	"build-status": true,
+	"task-stats": true,
+	"build-stats": true,
+	"task-count": true,
+	"build-count": true,
+} satisfies Record<WebhookEventType, true>) as WebhookEventType[];
+const EVENT_LIST = WEBHOOK_EVENTS.join(", ");
+
+function parseEvents(maybeCsv?: string): WebhookEventType[] | undefined {
 	if (!maybeCsv) return undefined;
 	const arr = String(maybeCsv)
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
-	return arr.length ? arr : undefined;
+	const unknown = arr.filter((e) => !WEBHOOK_EVENTS.includes(e as WebhookEventType));
+	if (unknown.length) {
+		throw new Error(`Unknown event ${unknown.join(", ")}. Events are: ${EVENT_LIST}.`);
+	}
+	return arr.length ? (arr as WebhookEventType[]) : undefined;
 }
 
-function resolveStatusFlag(opts: {
-	status?: string;
-	active?: boolean;
-	disabled?: boolean;
-}): "active" | "disabled" | undefined {
+// The webhook request fields the API renamed to PascalCase, and their new names.
+const RENAMED_WEBHOOK_FIELDS: Record<string, string> = {
+	url: "URL",
+	events: "Events",
+	description: "Description",
+	status: "Status",
+};
+
+/** Loads a --payload-file, refusing the lowercase field names the API no longer accepts. */
+async function loadWebhookPayloadFile(file?: string): Promise<Record<string, unknown>> {
+	const extra = (await loadJsonIfPath(file)) || {};
+	const renamed = Object.keys(extra).filter((key) => key in RENAMED_WEBHOOK_FIELDS);
+	if (renamed.length) {
+		const hint = renamed.map((key) => `${key} → ${RENAMED_WEBHOOK_FIELDS[key]}`).join(", ");
+		throw new Error(
+			`${file} uses lowercase webhook fields, which the API no longer accepts. Rename them: ${hint}.`,
+		);
+	}
+	return extra;
+}
+
+function resolveStatusFlag(opts: { status?: string; active?: boolean; disabled?: boolean }): WebhookStatus | undefined {
 	if (opts.status) {
 		const s = String(opts.status).toLowerCase();
 		if (s === "active" || s === "disabled") return s;
@@ -64,8 +114,11 @@ export default function webhooks(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	cmd.command("list")
-		.description("List all configured webhooks")
+	addPaginationOptions(cmd.command("list"), {
+		limitHelp: limitHelp(100),
+		startKey: false,
+	})
+		.description("List configured webhooks")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -77,16 +130,15 @@ export default function webhooks(program: Command) {
 			const spinner = createSpinner("Fetching webhooks...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.webhooks.list();
-				spinner.succeed();
+				const result = await fetchWithPagination((query) => client.webhooks.list(query), "Webhooks", opts);
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					printData(JSON.stringify(res, null, 2));
+					printListing("Webhooks", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					const webhooks = (res as any).Webhooks || (res as any).webhooks || [];
-					printData(createCustomTable("webhooks", webhooks, selectedColumns));
+					printListingTable("webhooks", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list webhooks");
@@ -118,37 +170,41 @@ export default function webhooks(program: Command) {
 			}
 		});
 
-	// Fixed: final object is always WebhookDetails
+	// Prints the create response, which is the only place the API returns the signing Secret.
 	cmd.command("create")
 		.description("Create a new webhook endpoint")
 		.requiredOption("--url <url>", "Target URL")
-		.option("--events <e1,e2,...>", "Comma-separated event list")
+		.option("--events <e1,e2,...>", `Comma-separated event list: ${EVENT_LIST}`)
 		.option("--description <text>", "Optional description")
 		.option("--status <active|disabled>", "Set status after create")
 		.option("--payload-file <json>", "Optional JSON payload to merge (advanced)")
 		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating webhook...");
+			// The Secret is never returned again, so once the webhook exists it is printed even
+			// if the status update that follows fails.
+			let created: CreateWebhookResponse | undefined;
 			try {
-				const client = makeClient(await loadConfig());
-
-				const basePayload: Record<string, any> = {
-					url: opts.url,
-					events: parseEvents(opts.events),
-					description: typeof opts.description === "string" ? opts.description : undefined,
-				};
-
-				const extra = (await loadJsonIfPath(opts.payloadFile)) || {};
-				const createPayload = { ...basePayload, ...extra };
-
-				// Create first
-				const created = await client.webhooks.create(createPayload as any);
-
-				// Then ensure we return WebhookDetails
+				// Everything that can be refused is checked before the webhook exists.
 				const status = resolveStatusFlag({ status: opts.status });
+				const basePayload: Partial<CreateWebhookRequest> = {
+					URL: opts.url,
+					Events: parseEvents(opts.events),
+					Description: typeof opts.description === "string" ? opts.description : undefined,
+				};
+				const createPayload = { ...basePayload, ...(await loadWebhookPayloadFile(opts.payloadFile)) };
+				if (!Array.isArray(createPayload.Events) || createPayload.Events.length === 0) {
+					throw new Error(`--events is required. Events are: ${EVENT_LIST}.`);
+				}
+
+				const client = makeClient(await loadConfig());
+				created = await client.webhooks.create(createPayload as CreateWebhookRequest);
 				const details = status
-					? await client.webhooks.update(created.webhookId, { status })
-					: await client.webhooks.getOne(created.webhookId);
+					? {
+							...(await client.webhooks.update(created.WebhookID, { Status: status })),
+							Secret: created.Secret,
+						}
+					: created;
 
 				spinner.succeed("Webhook created");
 
@@ -159,7 +215,12 @@ export default function webhooks(program: Command) {
 					displayResource(details, "Created Webhook");
 				}
 			} catch (e: any) {
-				spinner.fail("Failed to create webhook");
+				if (created) {
+					printData(JSON.stringify(created, null, 2));
+					spinner.fail("Webhook created, but setting its status failed");
+				} else {
+					spinner.fail("Failed to create webhook");
+				}
 				await handleCliError(e);
 			}
 		});
@@ -168,7 +229,7 @@ export default function webhooks(program: Command) {
 		.description("Update an existing webhook's configuration")
 		.requiredOption("--webhook-id <id>", "Webhook ID")
 		.option("--url <url>", "New URL")
-		.option("--events <e1,e2,...>", "Comma-separated event list")
+		.option("--events <e1,e2,...>", `Comma-separated event list: ${EVENT_LIST}`)
 		.option("--description <text>", "New description")
 		.option("--status <active|disabled>", "Set status")
 		.option("--active", "Shortcut for --status active")
@@ -181,23 +242,22 @@ export default function webhooks(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const payload: Record<string, any> = {};
-				if (typeof opts.url === "string") payload.url = opts.url;
+				const payload: Partial<UpdateWebhookRequest> & Record<string, unknown> = {};
+				if (typeof opts.url === "string") payload.URL = opts.url;
 				const events = parseEvents(opts.events);
-				if (events) payload.events = events;
-				if (typeof opts.description === "string") payload.description = opts.description;
+				if (events) payload.Events = events;
+				if (typeof opts.description === "string") payload.Description = opts.description;
 
 				const status = resolveStatusFlag({
 					status: opts.status,
 					active: opts.active,
 					disabled: opts.disabled,
 				});
-				if (status) payload.status = status;
+				if (status) payload.Status = status;
 
-				const extra = (await loadJsonIfPath(opts.payloadFile)) || {};
-				Object.assign(payload, extra);
+				Object.assign(payload, await loadWebhookPayloadFile(opts.payloadFile));
 
-				const res = await client.webhooks.update(id, payload as any);
+				const res = await client.webhooks.update(id, payload as UpdateWebhookRequest);
 				spinner.succeed("Webhook updated");
 
 				const format = (opts.format || "json") as OutputFormat;

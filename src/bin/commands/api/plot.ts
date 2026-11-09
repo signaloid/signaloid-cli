@@ -3,7 +3,7 @@ import { createSpinner } from "../../utils/spinner";
 import path from "path";
 import { loadConfig } from "../../utils/config";
 import { webReadableToBuffer, writeBinary } from "../../utils/fsx";
-import { loadJsonIfPath } from "../../utils/params";
+import { loadJsonIfPath, loadUxPayloadFile } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
 import { PlotResponse } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
@@ -52,8 +52,7 @@ export default function plot(program: Command) {
 				const client = makeClient(await loadConfig());
 				let res: PlotResponse;
 				if (opts.file) {
-					const payload = await loadJsonIfPath(opts.file);
-					res = await client.plotting.plot(payload as any);
+					res = await client.plotting.plot(await loadUxPayloadFile(opts.file));
 				} else {
 					const raw = opts.uxString;
 					res = await client.plotting.plot(raw);
@@ -65,8 +64,8 @@ export default function plot(program: Command) {
 					process.exit(EXIT_CODES.USAGE);
 				}
 
-				const plotId = res.plotID;
-				const plotImage = await fetch(res.presignedURL, { method: "GET" });
+				const plotId = res.PlotID;
+				const plotImage = await fetch(res.PresignedURL, { method: "GET" });
 
 				let outDir = path.resolve(opts.out || `.${path.sep}`);
 				let fileName = `${plotId}.png`;
@@ -120,8 +119,8 @@ export default function plot(program: Command) {
 				const res = await client.plotting.plotValue(String(taskID), String(valueID));
 
 				spinner.succeed();
-				const plotId = res.plotID;
-				const plotImage = await fetch(res.presignedURL, { method: "GET" });
+				const plotId = res.PlotID;
+				const plotImage = await fetch(res.PresignedURL, { method: "GET" });
 
 				let outDir = path.resolve(opts.out || `.${path.sep}`);
 				let fileName = `${plotId}.png`;

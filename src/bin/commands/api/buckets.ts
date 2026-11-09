@@ -4,14 +4,20 @@ import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import {
 	OutputFormat,
+	finishListingSpinner,
+	listByIds,
+	printListing,
+	printListingTable,
 	displayResource,
 	createCustomTable,
 	parseColumns,
 	showAvailableColumns,
+	addPaginationOptions,
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import type { BucketRequest } from "@signaloid/scce-sdk";
 
 /**
  * Registers the 'buckets' command and subcommands for managing cloud storage buckets.
@@ -30,7 +36,7 @@ import { printData } from "../../utils/verbosity";
  * @example
  * ```
  * signaloid-cli buckets list
- * signaloid-cli buckets create --name my-bucket --account acc-123 --region us-east-1
+ * signaloid-cli buckets create --name my-bucket --account acc-123 --read
  * signaloid-cli buckets update --bucket-id bucket-456 --read --write
  * signaloid-cli buckets update --bucket-id bucket-456 --no-write
  * ```
@@ -40,9 +46,8 @@ export default function buckets(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	cmd.command("list")
+	addPaginationOptions(cmd.command("list"))
 		.description("List buckets")
-		.option("--start-key <key>", "Pagination cursor token")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -56,21 +61,21 @@ export default function buckets(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const listRes = await client.buckets.list(opts.startKey ? { startKey: opts.startKey } : undefined);
-				const bucketIds: string[] = listRes.bucket_ids || [];
-
-				const buckets = await Promise.all(
-					bucketIds.map((id) => client.buckets.getOne(id)),
+				const result = await listByIds(
+					(query) => client.buckets.list(query),
+					"BucketIDs",
+					(id) => client.buckets.getOne(id),
+					opts,
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					printData(JSON.stringify({ Buckets: buckets }, null, 2));
+					printListing("Buckets", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("buckets", buckets, selectedColumns));
+					printListingTable("buckets", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to fetch buckets");
@@ -105,7 +110,6 @@ export default function buckets(program: Command) {
 		.description("Create a bucket")
 		.requiredOption("--name <name>", "Bucket name (Name)")
 		.requiredOption("--account <account>", "Account identifier (Account)")
-		.option("--mount-path <path>", "Mount path (MountPath)")
 		.option("--read", "Enable read access (Read)")
 		.option("--write", "Enable write access (Write)")
 		.action(async (opts) => {
@@ -113,22 +117,15 @@ export default function buckets(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const payload: {
-					Name: string;
-					Account: string;
-					MountPath?: string;
-					Read?: boolean;
-					Write?: boolean;
-				} = {
+				const payload: BucketRequest = {
 					Name: opts.name,
 					Account: opts.account,
 				};
 
-				if (typeof opts.mountPath === "string") payload.MountPath = opts.mountPath;
 				if (typeof opts.read !== "undefined") payload.Read = !!opts.read;
 				if (typeof opts.write !== "undefined") payload.Write = !!opts.write;
 
-				const res = await client.buckets.create(payload as any);
+				const res = await client.buckets.create(payload);
 				spinner.succeed("Bucket created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -142,7 +139,6 @@ export default function buckets(program: Command) {
 		.requiredOption("--bucket-id <id>", "Bucket ID")
 		.option("--name <name>", "Bucket name (Name)")
 		.option("--account <account>", "Account identifier (Account)")
-		.option("--mount-path <path>", "Mount path (MountPath)")
 		.option("--read", "Enable read access (Read)")
 		.option("--no-read", "Disable read access (Read)")
 		.option("--write", "Enable write access (Write)")
@@ -156,7 +152,6 @@ export default function buckets(program: Command) {
 				const patch: Record<string, unknown> = {};
 				if (typeof opts.name === "string") patch.Name = opts.name;
 				if (typeof opts.account === "string") patch.Account = opts.account;
-				if (typeof opts.mountPath === "string") patch.MountPath = opts.mountPath;
 				if (typeof opts.read !== "undefined") patch.Read = !!opts.read;
 				if (typeof opts.write !== "undefined") patch.Write = !!opts.write;
 

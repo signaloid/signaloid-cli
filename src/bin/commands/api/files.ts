@@ -11,7 +11,12 @@ import {
 	createCustomTable,
 	parseColumns,
 	showAvailableColumns,
+	finishListingSpinner,
 	fetchWithPagination,
+	printListing,
+	printListingTable,
+	addPaginationOptions,
+	limitHelp,
 } from "../../utils/output";
 import { FileItem } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
@@ -50,12 +55,10 @@ export default function files(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	cmd.command("list")
+	addPaginationOptions(cmd.command("list"), { limitHelp: limitHelp(100) })
 		.alias("ls")
 		.description("List files (optionally under a path)")
 		.option("--path <p>", "Directory path (e.g., 'datasets/' )")
-		.option("--start-key <token>", "Pagination cursor token")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
 		.action(async (opts) => {
@@ -68,34 +71,21 @@ export default function files(program: Command) {
 			const spinner = createSpinner("Listing files...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
 				const result = await fetchWithPagination(
-					// The files API calls the page cursor nextContinuationToken.
-					(startKey) =>
-						client.files
-							.list({
-								path: opts.path,
-								startKey: startKey || opts.startKey,
-							})
-							.then((page) => ({ ...page, ContinuationKey: page.nextContinuationToken })),
-					"items",
-					targetCount,
-					spinner,
+					(query) => client.files.list({ path: opts.path, ...query }),
+					"Files",
+					opts,
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Files: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					printData(JSON.stringify(output, null, 2));
+					printListing("Files", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("files", result.items, selectedColumns));
+					printListingTable("files", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list files");
@@ -137,13 +127,8 @@ export default function files(program: Command) {
 				let fileBuf: Buffer;
 				let suggestedNameFromHeaders: string | undefined;
 
-				if (
-					resp &&
-					typeof resp === "object" &&
-					"download_url" in resp &&
-					typeof resp.download_url === "string"
-				) {
-					const url = resp.download_url as string;
+				if (resp && typeof resp === "object" && "DownloadURL" in resp && typeof resp.DownloadURL === "string") {
+					const url = resp.DownloadURL;
 					const r = await fetch(url, { method: "GET" });
 					if (!r.ok || !r.body) {
 						throw new Error(`Fetch failed with status ${r.status} ${r.statusText}`);

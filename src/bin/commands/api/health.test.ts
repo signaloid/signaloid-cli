@@ -15,7 +15,7 @@ jest.mock("ora", () => ({
 
 jest.mock("../../utils/sdk", () => {
 	const health = {
-		getOverallHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
+		getOverallHealth: jest.fn().mockResolvedValue({ Timestamp: "t", Services: [] }),
 	};
 	return {
 		__esModule: true,

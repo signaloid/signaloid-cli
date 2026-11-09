@@ -1,3 +1,5 @@
+import { InvalidArgumentError } from "commander";
+
 /**
  * Input validation utilities for CLI commands
  */
@@ -141,4 +143,16 @@ export function validateFilePath(filePath: string): boolean {
 	if (filePath.includes("\0")) return false;
 
 	return true;
+}
+
+/**
+ * Commander parser for options that take a positive integer, such as --count, --limit and
+ * --timeout. Unlike `parseInt` it refuses trailing text, so "5abc" is an error rather than 5.
+ */
+export function parsePositiveInt(value: string): number {
+	const n = Number(value);
+	if (!Number.isInteger(n) || n <= 0) {
+		throw new InvalidArgumentError("must be a positive integer");
+	}
+	return n;
 }

@@ -29,6 +29,7 @@ const mockParseKeyVals = jest.fn((pairs: string[] = []) => {
 	return out;
 });
 jest.mock("../../utils/params", () => ({
+	...jest.requireActual("../../utils/params"),
 	loadJsonIfPath: jest.fn((...args) => mockLoadJsonIfPath(...args)),
 	parseKeyVals: jest.fn((...args) => mockParseKeyVals(...(args as any))),
 }));
@@ -53,6 +54,7 @@ jest.mock("../../utils/sdk", () => {
 });
 
 import tasksCmd from "./tasks";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockTasksAPI } = jest.requireMock("../../utils/sdk");
 
 const logs: string[] = [];
@@ -113,7 +115,10 @@ describe("tasks CLI", () => {
 	});
 
 	it("list with filters and limit", async () => {
-		mockTasksAPI.list.mockResolvedValueOnce({ Tasks: [1, 2, 3, 4] });
+		mockTasksAPI.list.mockResolvedValueOnce({
+			Tasks: [1, 2],
+			Pagination: paginationBlock("tok_next", 2),
+		});
 		const program = makeProgram();
 		await program.parseAsync([
 			"node",
@@ -139,8 +144,9 @@ describe("tasks CLI", () => {
 			to: "2025-10-01T00:00:00Z",
 			startKey: "sk_1",
 		});
+		// --status is applied after limit, so the request asks for a full page, not --count Tasks.
 		const out = JSON.parse(logs[0]);
-		expect(out.Tasks.length).toBe(2);
+		expect(out).toEqual({ Tasks: [1, 2], Count: 2, Cursor: "tok_next" });
 	});
 
 	it("list without options", async () => {

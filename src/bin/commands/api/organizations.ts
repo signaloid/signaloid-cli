@@ -1,10 +1,18 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { createSpinner } from "../../utils/spinner";
 import { loadConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { OutputFormat, displayResource } from "../../utils/output";
+import {
+	addPaginationOptions,
+	displayResource,
+	finishListingSpinner,
+	fetchWithPagination,
+	limitHelp,
+	OutputFormat,
+	printListing,
+} from "../../utils/output";
 import { printData } from "../../utils/verbosity";
 
 export default function organizations(program: Command) {
@@ -57,17 +65,29 @@ export default function organizations(program: Command) {
 
 	const usersCmd = cmd.command("users").description("Manage organization users");
 
-	usersCmd
-		.command("list")
-		.description("List organization users")
+	addPaginationOptions(usersCmd.command("list"), {
+		limitHelp: limitHelp(100),
+		startKey: false,
+	})
+		.description("List organization members, or pending invitations with --status Pending")
 		.requiredOption("--org-id <id>", "Organization ID")
+		.addOption(
+			new Option("--status <status>", "Which list to show, Active members or Pending invitations")
+				.choices(["Active", "Pending"])
+				.default("Active"),
+		)
 		.action(async (opts) => {
 			const spinner = createSpinner("Fetching users...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.organizations.listUsers(String(opts.orgId));
-				spinner.succeed();
-				printData(JSON.stringify(res, null, 2));
+				// Members and invitations are separate lists, each paged on its own.
+				const result = await fetchWithPagination(
+					(query) => client.organizations.listUsers(String(opts.orgId), { ...query, status: opts.status }),
+					"Users",
+					opts,
+				);
+				finishListingSpinner(spinner, result);
+				printListing("Users", result);
 			} catch (e: any) {
 				spinner.fail("Failed");
 				await handleCliError(e);
@@ -106,11 +126,9 @@ export default function organizations(program: Command) {
 			const spinner = createSpinner("Updating role...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.organizations.updateUserRole(
-					String(opts.orgId),
-					String(opts.userId),
-					{ Role: opts.role },
-				);
+				const res = await client.organizations.updateUserRole(String(opts.orgId), String(opts.userId), {
+					Role: opts.role,
+				});
 				spinner.succeed("Role updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -128,10 +146,7 @@ export default function organizations(program: Command) {
 			const spinner = createSpinner("Removing user...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.organizations.removeUser(
-					String(opts.orgId),
-					String(opts.identifier),
-				);
+				const res = await client.organizations.removeUser(String(opts.orgId), String(opts.identifier));
 				spinner.succeed("User removed");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -140,15 +155,22 @@ export default function organizations(program: Command) {
 			}
 		});
 
-	cmd.command("invitations")
+	addPaginationOptions(cmd.command("invitations"), {
+		limitHelp: limitHelp(100),
+		startKey: false,
+	})
 		.description("List pending invitations for the current user")
-		.action(async () => {
+		.action(async (opts) => {
 			const spinner = createSpinner("Fetching invitations...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.organizations.listInvitations();
-				spinner.succeed();
-				printData(JSON.stringify(res, null, 2));
+				const result = await fetchWithPagination(
+					(query) => client.organizations.listInvitations(query),
+					"Invitations",
+					opts,
+				);
+				finishListingSpinner(spinner, result);
+				printListing("Invitations", result);
 			} catch (e: any) {
 				spinner.fail("Failed");
 				await handleCliError(e);

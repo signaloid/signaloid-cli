@@ -1,7 +1,7 @@
 import path from "path";
 
 /**
- * Picks the filename for a download, preferring what the server says.
+ * Picks the filename for a download, preferring what the Signaloid Cloud Compute Engine says.
  * Falls back to the object key in the URL, then to the caller's name.
  */
 export function resolveDownloadFilename(headers: Headers, url: string, fallback: string): string {

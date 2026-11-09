@@ -1,6 +1,6 @@
 {
   "name": "@signaloid/signaloid-cli",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "",
   "main": "dist/bin/cli.js",
   "files": [
@@ -34,7 +34,7 @@
     "prepublishOnly": "npm run set:config:production && npm run build:production"
   },
   "dependencies": {
-    "@signaloid/scce-sdk": "4.0.0",
+    "@signaloid/scce-sdk": "5.0.0",
     "commander": "13.1.0",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",

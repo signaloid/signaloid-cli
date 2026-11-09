@@ -7,16 +7,21 @@ import { writeBinary } from "../../utils/fsx";
 import {
 	createCustomTable,
 	displayResource,
+	finishListingSpinner,
 	fetchWithPagination,
+	printListing,
+	printListingTable,
 	OutputFormat,
 	parseColumns,
 	showAvailableColumns,
+	addPaginationOptions,
 } from "../../utils/output";
 import { loadJsonIfPath, parseKeyVals } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
+import { parsePositiveInt } from "../../utils/validation";
 import { EXIT_CODES } from "../../utils/exit-codes";
 
 const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
@@ -97,8 +102,11 @@ export default function tasks(program: Command) {
 			}
 		});
 
-	// signaloid-cli tasks list [--status ...] [--from iso] [--to iso] [--start-key key] [--count n] [--limit n] [--summary]
-	cmd.command("list")
+	// signaloid-cli tasks list [--status ...] [--from <iso>] [--to <iso>] [--cursor <cursor>] [--count n] [--limit n] [--summary]
+	addPaginationOptions(cmd.command("list"), {
+		limitHelp: "Tasks per request, at most 25 (500 with --summary)",
+		filtersAfterLimit: true,
+	})
 		.description("List tasks")
 		.option(
 			"--status <s...>",
@@ -106,9 +114,6 @@ export default function tasks(program: Command) {
 		)
 		.option("--from <iso>", "From timestamp (ISO)")
 		.option("--to <iso>", "To timestamp (ISO)")
-		.option("--start-key <key>", "Pagination cursor token")
-		.option("--count <n>", "Number of items to fetch using pagination", (v) => parseInt(v, 10))
-		.option("--limit <n>", "Per-request page size cap (max 25 expanded / 500 summary)", (v) => parseInt(v, 10))
 		.option("--summary", "Return summary rows (TaskID/Owner/CreatedAt) instead of expanded tasks")
 		.option("--format <type>", "Output format: table|json", "json")
 		.option("--columns <cols>", "Columns to display (comma-separated) or 'help' to see available columns")
@@ -122,38 +127,25 @@ export default function tasks(program: Command) {
 			const spinner = createSpinner("Fetching tasks...");
 			try {
 				const client = makeClient(await loadConfig());
-				const targetCount = opts.count;
 
 				const result = await fetchWithPagination(
-					(startKey) => {
-						const params = {
-							status: opts.status,
-							from: opts.from,
-							to: opts.to,
-							startKey: startKey || opts.startKey,
-							...(opts.limit !== undefined && { limit: opts.limit }),
-						};
-						return opts.summary
-							? client.tasks.listSummary(params)
-							: client.tasks.list(params);
+					(query) => {
+						const params = { ...query, status: opts.status, from: opts.from, to: opts.to };
+						return opts.summary ? client.tasks.listSummary(params) : client.tasks.list(params);
 					},
 					"Tasks",
-					targetCount,
-					spinner,
+					// --status is applied after limit, so each request asks for a full page.
+					{ ...opts, filtersAfterLimit: Boolean(opts.status) },
 				);
 
-				spinner.succeed();
+				finishListingSpinner(spinner, result);
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
-					const output: any = { Tasks: result.items };
-					if (result.continuationKey) {
-						output.ContinuationKey = result.continuationKey;
-					}
-					printData(JSON.stringify(output, null, 2));
+					printListing("Tasks", result);
 				} else {
 					const selectedColumns = parseColumns(opts.columns);
-					printData(createCustomTable("tasks", result.items, selectedColumns));
+					printListingTable("tasks", result, selectedColumns);
 				}
 			} catch (e: any) {
 				spinner.fail("Failed to list tasks");
@@ -172,9 +164,7 @@ export default function tasks(program: Command) {
 			const spinner = createSpinner("Fetching task...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = opts.public
-					? await client.tasks.getPublic(taskId)
-					: await client.tasks.getOne(taskId);
+				const res = opts.public ? await client.tasks.getPublic(taskId) : await client.tasks.getOne(taskId);
 				spinner.succeed();
 
 				const format = (opts.format || "json") as OutputFormat;
@@ -316,7 +306,7 @@ export default function tasks(program: Command) {
 	cmd.command("watch")
 		.description("Wait for task to reach a terminal state")
 		.requiredOption("--task-id <id>", "Task ID")
-		.option("--timeout <sec>", "Timeout in seconds (default 60)", (v) => parseInt(v, 10))
+		.option("--timeout <sec>", "Timeout in seconds (default 60)", parsePositiveInt)
 		.action(async (opts) => {
 			const taskId = String(opts.taskId);
 			const spinner = createSpinner(`Waiting for task ${taskId}...`);

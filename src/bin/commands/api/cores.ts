@@ -21,7 +21,7 @@ import {
 } from "../../utils/output";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { printData } from "../../utils/verbosity";
+import { printData, printError } from "../../utils/verbosity";
 import { EXIT_CODES, usageError } from "../../utils/exit-codes";
 
 // Keyed by the SDK types, so the compiler flags a class or mode the SDK adds and these lack.
@@ -38,6 +38,8 @@ const MICROARCHITECTURES = Object.keys({
 	Bypass: true,
 	Reference: true,
 	Jupiter: true,
+	Mercury: true,
+	Europa: true,
 	Native: true,
 } satisfies Record<Microarchitecture, true>) as Microarchitecture[];
 const DEPENDENCY_TRACKING_MODES = Object.keys({
@@ -71,10 +73,25 @@ const TRACKING_BY_MICROARCHITECTURE = {
 	Athens: ["None", "Basic"],
 	Rome: ["None", "Basic"],
 	Jupiter: ["Advanced"],
+	Mercury: ["Advanced"],
+	Europa: ["Advanced"],
 	Bypass: ["None"],
 	Reference: ["None"],
 	Native: ["None"],
 } satisfies Record<Microarchitecture, DependencyTracking[]>;
+
+/**
+ * The API ignores a requested MemorySize: memory is fixed per core class. --memory is still
+ * accepted so existing scripts keep working, but it is not sent, and the user is told so.
+ * `actual` is the memory size the Signaloid Cloud Compute Engine gave the core, when the response carries it.
+ */
+function warnMemoryIgnored(requested: number | undefined, actual?: number): void {
+	if (requested === undefined) return;
+	const set = actual !== undefined ? ` It set this core's memory size to ${actual} bytes.` : "";
+	printError(
+		`Warning: --memory is ignored. The Signaloid Cloud Compute Engine sets the memory size from the core class.${set}`,
+	);
+}
 
 /** The usage error for a --precision or --dependency-tracking a core with fixed fields refuses, if any. */
 function fixedFieldsConflictError(
@@ -178,17 +195,6 @@ export default function cores(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const fetchAll = async (params: { default?: boolean }) => {
-					const out: any[] = [];
-					let startKey: string | undefined;
-					do {
-						const res = await client.cores.list({ ...params, ...(startKey ? { startKey } : {}) });
-						for (const core of res.Cores || []) out.push(core);
-						startKey = res.ContinuationKey;
-					} while (startKey);
-					return out;
-				};
-
 				// Omitting default returns custom cores, passing default true returns default cores.
 				const sources: { default?: boolean }[] = opts.default
 					? [{ default: true }]
@@ -196,10 +202,13 @@ export default function cores(program: Command) {
 						? [{}]
 						: [{ default: true }, {}];
 
+				// listAll() follows Pagination.Links.Next across pages, including empty ones. The two
+				// listings are independent, so they run together, and are merged in this order.
+				const listings = await Promise.all(sources.map((src) => client.cores.listAll(src)));
 				const seen = new Set<string>();
 				const allCores: any[] = [];
-				for (const src of sources) {
-					for (const core of await fetchAll(src)) {
+				for (const listing of listings) {
+					for (const core of listing) {
 						if (!seen.has(core.CoreID)) {
 							seen.add(core.CoreID);
 							allCores.push(core);
@@ -259,7 +268,11 @@ export default function cores(program: Command) {
 			"Precision (number, required except for the r7i class and the Bypass microarchitecture)",
 			wholeNumber,
 		)
-		.option("--memory <n>", "Memory size (deprecated: the server sets it from the core class)", wholeNumber)
+		.option(
+			"--memory <n>",
+			"Ignored, with a warning: the Signaloid Cloud Compute Engine sets the memory size from the core class",
+			wholeNumber,
+		)
 		.addOption(
 			new Option("--microarchitecture <arch>", "Microarchitecture")
 				.choices(MICROARCHITECTURES)
@@ -302,10 +315,10 @@ export default function cores(program: Command) {
 					Microarchitecture: opts.microarchitecture,
 					DependencyTracking: opts.dependencyTracking,
 				} as CoreRequest;
-				if (Number.isFinite(opts.memory)) payload.MemorySize = opts.memory;
 
 				const res = await client.cores.create(payload);
 				spinner.succeed("Core created");
+				warnMemoryIgnored(opts.memory, res.MemorySize);
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create core");
@@ -324,7 +337,11 @@ export default function cores(program: Command) {
 			"New precision (number, required to change an r7i or Bypass core to a microarchitecture that takes one)",
 			wholeNumber,
 		)
-		.option("--memory <n>", "New memory size (deprecated: the server sets it from the core class)", wholeNumber)
+		.option(
+			"--memory <n>",
+			"Ignored, with a warning: the Signaloid Cloud Compute Engine sets the memory size from the core class",
+			wholeNumber,
+		)
 		.addOption(
 			new Option(
 				"--microarchitecture <arch>",
@@ -426,10 +443,10 @@ export default function cores(program: Command) {
 
 				if (typeof opts.name === "string") patch.Name = opts.name;
 				if (Number.isFinite(opts.precision)) patch.Precision = opts.precision;
-				if (Number.isFinite(opts.memory)) patch.MemorySize = opts.memory;
 
 				const res = await client.cores.update(id, patch);
 				spinner.succeed("Core updated");
+				warnMemoryIgnored(opts.memory);
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update core");

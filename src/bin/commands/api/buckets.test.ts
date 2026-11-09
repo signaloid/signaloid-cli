@@ -6,7 +6,8 @@ jest.mock("../../utils/config", () => ({
 
 jest.mock("../../utils/sdk", () => {
 	const mockBucketsAPI = {
-		list: jest.fn().mockResolvedValue({ Buckets: [] }),
+		list: jest.fn().mockResolvedValue({ UserID: "usr_1", BucketIDs: [], Count: 0 }),
+		getOne: jest.fn(),
 		create: jest.fn().mockResolvedValue({}),
 		update: jest.fn().mockResolvedValue({}),
 		delete: jest.fn().mockResolvedValue({}),
@@ -59,6 +60,20 @@ describe("buckets CLI", () => {
 		expect(logSpy).toHaveBeenCalled();
 	});
 
+	it("buckets list --count pages past an empty page and prints the last ContinuationKey", async () => {
+		mockBucketsAPI.list
+			.mockResolvedValueOnce({ UserID: "usr_1", BucketIDs: ["bkt_a"], Count: 1, ContinuationKey: "bkt_a" })
+			.mockResolvedValueOnce({ UserID: "usr_1", BucketIDs: [], Count: 0, ContinuationKey: "bkt_m" })
+			.mockResolvedValueOnce({ UserID: "usr_1", BucketIDs: ["bkt_b"], Count: 1, ContinuationKey: "bkt_b" });
+		mockBucketsAPI.getOne.mockImplementation(async (id: string) => ({ BucketID: id }));
+		const program = makeProgram();
+		await program.parseAsync(["node", "test", "buckets", "list", "--count", "2"]);
+		expect(mockBucketsAPI.list).toHaveBeenCalledTimes(3);
+		const output = JSON.parse(logSpy.mock.calls.at(-1)![0]);
+		expect(output.Buckets).toEqual([{ BucketID: "bkt_a" }, { BucketID: "bkt_b" }]);
+		expect(output.ContinuationKey).toBe("bkt_b");
+	});
+
 	it("runs buckets list --start-key abc", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "test", "buckets", "list", "--start-key", "abc"]);
@@ -76,15 +91,12 @@ describe("buckets CLI", () => {
 			"my-bucket",
 			"--account",
 			"acc-123",
-			"--mount-path",
-			"/mnt/data",
 			"--read",
 			"--write",
 		]);
 		expect(mockBucketsAPI.create).toHaveBeenCalledWith({
 			Name: "my-bucket",
 			Account: "acc-123",
-			MountPath: "/mnt/data",
 			Read: true,
 			Write: true,
 		});

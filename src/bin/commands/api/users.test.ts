@@ -33,6 +33,7 @@ jest.mock("../../utils/sdk", () => {
 });
 
 import usersCmd from "./users";
+import { paginationBlock } from "../../test-utils/pagination";
 const { mockUsersAPI } = jest.requireMock("../../utils/sdk");
 
 jest.spyOn(console, "log").mockImplementation(() => {});
@@ -102,6 +103,25 @@ describe("users CLI", () => {
 		});
 	});
 
+	it("logs keeps queryTimeRange and totalResults in its output", async () => {
+		mockUsersAPI.me.mockResolvedValueOnce({ UserID: "u-3" });
+		const range = { startTime: 1000, endTime: 2000 };
+		mockUsersAPI.getLogs.mockResolvedValueOnce({
+			logs: [{ eventType: "SignIn" }],
+			queryTimeRange: range,
+			totalResults: 1,
+			Pagination: paginationBlock(undefined, 100),
+		});
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "logs"]);
+		const log = jest.mocked(console.log);
+		expect(JSON.parse(log.mock.calls[log.mock.calls.length - 1][0])).toEqual({
+			logs: [{ eventType: "SignIn" }],
+			queryTimeRange: range,
+			totalResults: 1,
+		});
+	});
+
 	it("logs exits on invalid from date", async () => {
 		const program = makeProgram();
 		await expect(program.parseAsync(["node", "x", "users", "logs", "--from", "bad-date"])).rejects.toThrow(/EXIT/);
@@ -125,7 +145,9 @@ describe("users CLI", () => {
 	it("update exits on error", async () => {
 		mockUsersAPI.update.mockRejectedValueOnce(new Error("fail"));
 		const program = makeProgram();
-		await expect(program.parseAsync(["node", "x", "users", "update", "--pref", "theme=dark"])).rejects.toThrow(/EXIT/);
+		await expect(program.parseAsync(["node", "x", "users", "update", "--pref", "theme=dark"])).rejects.toThrow(
+			/EXIT/,
+		);
 		expect(exitCode).toBe(1);
 	});
 });
