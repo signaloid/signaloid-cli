@@ -25,7 +25,7 @@ jest.mock("../../utils/sdk", () => {
 		create: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "active", Secret: "whsec_x" }),
 		update: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "disabled" }),
 		delete: jest.fn().mockResolvedValue({ ok: true }),
-		getStats: jest.fn().mockResolvedValue({ count: 1 }),
+		listAll: jest.fn().mockResolvedValue([]),
 		enable: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "active" }),
 		disable: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "disabled" }),
 	};
@@ -242,10 +242,30 @@ describe("webhooks CLI", () => {
 		expect(mockWebhooksAPI.delete).toHaveBeenCalledWith("wid-8");
 	});
 
-	it("stats", async () => {
+	it("stats counts the webhooks of every page", async () => {
+		// 150 webhooks, more than the API's 100 a page, as listAll() returns them.
+		const failed = { WebhookID: "w-f", Status: "disabled", FailureCount: 3, LastDeliveryStatus: "failed-unknown" };
+		const webhooks = [
+			...Array.from({ length: 149 }, (_, i) => ({
+				WebhookID: `w${i}`,
+				Status: "active",
+				FailureCount: 0,
+				LastDeliveryStatus: "success",
+			})),
+			failed,
+		];
+		mockWebhooksAPI.listAll.mockResolvedValueOnce(webhooks);
+		const log = jest.spyOn(console, "log").mockImplementation(() => {});
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "webhooks", "stats"]);
-		expect(mockWebhooksAPI.getStats).toHaveBeenCalled();
+		expect(mockWebhooksAPI.listAll).toHaveBeenCalled();
+		expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual({
+			total: 150,
+			active: 149,
+			disabled: 1,
+			withFailures: 1,
+			recentlyFailed: [failed],
+		});
 	});
 
 	it("enable", async () => {

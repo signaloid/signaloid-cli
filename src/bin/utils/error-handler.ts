@@ -1,8 +1,9 @@
 import { createSpinner, Spinner } from "./spinner";
 import chalk from "chalk";
 import { loadConfig } from "./config";
-import { printError, printTip } from "./verbosity";
+import { printDebugError, printError, printTip } from "./verbosity";
 import { EXIT_CODES } from "./exit-codes";
+import { errorCodeOf, httpStatusOf } from "./http-error";
 
 /**
  * Wraps an async function with consistent error handling and spinner management.
@@ -58,24 +59,54 @@ export async function withErrorHandlingCustom<T>(
 	}
 }
 
-/** The HTTP status carried by an SDK or axios error, if the API answered at all. */
-export function httpStatusOf(e: any): number | undefined {
-	return e?.status ?? e?.response?.status ?? e?.details?.response?.status;
+/**
+ * Some API errors carry a JSON string as their message, such as
+ * `{"error":"You cannot perform this action"}`. Returns the inner message for those,
+ * and the message unchanged otherwise.
+ */
+function unwrapErrorMessage(msg: string): string {
+	const trimmed = msg.trim();
+	if (!trimmed.startsWith("{")) return msg;
+	try {
+		const inner = JSON.parse(trimmed);
+		const text = inner?.error ?? inner?.message;
+		return typeof text === "string" && text ? text : msg;
+	} catch {
+		return msg;
+	}
+}
+
+/** The message axios gives every HTTP error, which says nothing the status does not. */
+const GENERIC_HTTP_MESSAGE = /^Request failed with status code \d+$/;
+
+const nonEmpty = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
+
+/**
+ * The most useful message an error carries. The SDK sets `message` to the response body's
+ * `message`, or else to the generic axios message, and keeps the body in `details` and its
+ * `error` in `errorType`. So the body's `message` or `error` is preferred to the generic text.
+ */
+// TODO: the SDK could fall back to `errorType` itself (`body.message || errorType || err.message` in
+// SignaloidClient's error sanitizer). Drop the GENERIC_HTTP_MESSAGE check once a release does that.
+export function errorMessageOf(e: any): string {
+	const own = nonEmpty(e?.message);
+	const details = e?.details;
+	const text =
+		(own && !GENERIC_HTTP_MESSAGE.test(own.trim()) ? own : undefined) ??
+		nonEmpty(details) ??
+		nonEmpty(details?.message) ??
+		nonEmpty(details?.error) ??
+		nonEmpty(e?.errorType) ??
+		own;
+	return text ? unwrapErrorMessage(text) : "An error occurred";
 }
 
 export async function handleCliError(e: any, context?: string): Promise<never> {
-	let cfg: any = null;
-	try {
-		cfg = await loadConfig();
-	} catch {
-		// ignore; might fail before config exists
-	}
-
-	const code = e.code ?? e.details?.code;
+	const code = errorCodeOf(e);
 
 	const status = httpStatusOf(e);
 
-	const msg = e.message || e.details || e.details?.message || "An error occurred";
+	const msg = errorMessageOf(e);
 
 	const isAuthError =
 		code === "AUTH_EXPIRED_TOKEN" ||
@@ -86,7 +117,15 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 		status === 401 ||
 		msg === "Unauthorized";
 
+	printDebugError(e);
+
 	if (isAuthError) {
+		let cfg: any = null;
+		try {
+			cfg = await loadConfig();
+		} catch {
+			// ignore; might fail before config exists
+		}
 		const mode = cfg?.auth?.mode;
 
 		printError(chalk.red(msg));
@@ -144,6 +183,8 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 
 	printError(msg);
 
-	const isNotFound = status === 404;
-	process.exit(isNotFound ? EXIT_CODES.NOT_FOUND : EXIT_CODES.ERROR);
+	// A 403 means valid credentials that are not allowed to do this, so it exits 3 like
+	// other auth failures, but without a login tip.
+	const forbidden = status === 403 || code === "API_FORBIDDEN";
+	process.exit(forbidden ? EXIT_CODES.AUTH : status === 404 ? EXIT_CODES.NOT_FOUND : EXIT_CODES.ERROR);
 }

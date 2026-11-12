@@ -15,6 +15,7 @@ import {
 	OutputFormat,
 } from "../../utils/output";
 import { printData } from "../../utils/verbosity";
+import { usageError } from "../../utils/exit-codes";
 
 const REMOVABLE_FIELDS: readonly UserPatchRemovableField[] = ["Editor_Execution_DataSources", "Editor_Execution_Core"];
 
@@ -148,52 +149,57 @@ export default function users(program: Command) {
 		.option("--payload-file <json>", "JSON file with Preferences object")
 		.option("--format <type>", "Output format: table|json", "json")
 		.action(async (opts) => {
+			const profile: Record<string, unknown> = {};
+			if (opts.role !== undefined || opts.clearRole) {
+				profile.Role = opts.clearRole ? null : opts.role;
+			}
+			if (opts.industry !== undefined || opts.clearIndustry) {
+				profile.Industry = opts.clearIndustry ? null : opts.industry;
+			}
+			const prefPairs: [string, string][] = [];
+			for (const kv of opts.pref as string[]) {
+				const idx = kv.indexOf("=");
+				if (idx <= 0) {
+					usageError(`Invalid --pref "${kv}": expected key=value.`);
+					return;
+				}
+				prefPairs.push([kv.slice(0, idx), kv.slice(idx + 1)]);
+			}
+			const hasPrefInput = Boolean(opts.payloadFile) || (opts.pref as string[]).length > 0;
+			const removeFields = opts.remove as UserPatchRemovableField[];
+			if (!hasPrefInput && Object.keys(profile).length === 0 && removeFields.length === 0) {
+				usageError(
+					"At least one option must be provided: --pref, --remove, --role, --industry, --clear-role, --clear-industry or --payload-file.",
+				);
+				return;
+			}
+
 			const spinner = createSpinner("Updating user...");
 			try {
+				// Read the payload file first, so that a bad one fails before any request.
+				const extra = opts.payloadFile ? (await loadJsonIfPath(opts.payloadFile)) || {} : undefined;
+
 				const client = makeClient(await loadConfig());
 
 				const me = await client.users.me();
 				const userID = me.UserID;
 
-				// Start with current preferences, dropping UpdatedAt.
-				const { UpdatedAt, ...currentPrefs } = (me.Preferences || {}) as Record<string, unknown>;
-				const prefs: Record<string, string> = { ...currentPrefs } as Record<string, string>;
+				// The API sets each given preference key and leaves the others as they are, so
+				// only the keys given here are sent. Resending the stored ones would fail with 400
+				// for accounts with legacy keys (such as EditorTheme), which the API no longer accepts.
+				const prefs: Record<string, unknown> = {};
 
-				// Merge the payload file, unwrapping its Preferences key if present.
-				if (opts.payloadFile) {
-					const extra = (await loadJsonIfPath(opts.payloadFile)) || {};
-					const extraPrefs = (extra.Preferences ?? extra) as Record<string, unknown>;
+				// Merge the payload file, unwrapping its Preferences key if present. UpdatedAt is
+				// dropped, so that the Preferences of `users me` can be passed back as they are.
+				if (extra) {
+					const { UpdatedAt, ...extraPrefs } = (extra.Preferences ?? extra) as Record<string, unknown>;
 					Object.assign(prefs, extraPrefs);
 				}
 
 				// Merge inline --pref flags
-				for (const kv of opts.pref as string[]) {
-					const idx = kv.indexOf("=");
-					if (idx > 0) {
-						prefs[kv.slice(0, idx)] = kv.slice(idx + 1);
-					}
-				}
+				Object.assign(prefs, Object.fromEntries(prefPairs));
 
-				const hasPrefInput = Boolean(opts.payloadFile) || (opts.pref as string[]).length > 0;
-				const hasProfileInput =
-					opts.role !== undefined ||
-					opts.industry !== undefined ||
-					Boolean(opts.clearRole) ||
-					Boolean(opts.clearIndustry);
-
-				// Keep resending current preferences as before, unless the
-				// update only touches profile fields
-				const patch: Record<string, unknown> = {};
-				if (hasPrefInput || !hasProfileInput) {
-					patch.Preferences = prefs;
-				}
-				if (opts.role !== undefined || opts.clearRole) {
-					patch.Role = opts.clearRole ? null : opts.role;
-				}
-				if (opts.industry !== undefined || opts.clearIndustry) {
-					patch.Industry = opts.clearIndustry ? null : opts.industry;
-				}
-				const removeFields = opts.remove as UserPatchRemovableField[];
+				const patch = hasPrefInput ? { Preferences: prefs, ...profile } : profile;
 				const res =
 					removeFields.length > 0
 						? await client.users.update(userID, patch as any, { remove: removeFields })

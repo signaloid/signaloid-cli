@@ -13,7 +13,7 @@ jest.mock("./config", () => ({
 	loadConfig: jest.fn().mockResolvedValue({ auth: { mode: "apikey" } }),
 }));
 
-import { withErrorHandling, withErrorHandlingCustom, handleCliError } from "./error-handler";
+import { withErrorHandling, withErrorHandlingCustom, handleCliError, errorMessageOf } from "./error-handler";
 import { EXIT_CODES } from "./exit-codes";
 
 describe("error-handler utils", () => {
@@ -100,6 +100,47 @@ describe("error-handler utils", () => {
 		const e = { message: "Not Found", response: { status: 404 } };
 		await handleCliError(e);
 		expect(mockExit).toHaveBeenCalledWith(EXIT_CODES.NOT_FOUND);
+	});
+
+	it("handleCliError: 403 exits AUTH with the unwrapped message", async () => {
+		const e = {
+			code: "API_FORBIDDEN",
+			message: '{"error":"You cannot perform this action"}',
+			status: 403,
+		};
+		await handleCliError(e);
+		expect(mockExit).toHaveBeenNthCalledWith(1, EXIT_CODES.AUTH);
+		expect(mockErr).toHaveBeenCalledWith("You cannot perform this action");
+	});
+
+	it("handleCliError: an SdkError with the generic axios message prints the API's error text", async () => {
+		await handleCliError({
+			name: "SdkError",
+			code: "API_FORBIDDEN",
+			message: "Request failed with status code 403",
+			details: { error: "You cannot perform this action" },
+			errorType: "You cannot perform this action",
+			status: 403,
+		});
+		expect(mockErr).toHaveBeenCalledWith("You cannot perform this action");
+	});
+
+	it("errorMessageOf picks the most useful message", () => {
+		expect(errorMessageOf({ message: "", details: { error: "quota exceeded" } })).toBe("quota exceeded");
+		expect(errorMessageOf({ message: "Request failed with status code 500", errorType: "Boom" })).toBe("Boom");
+		expect(errorMessageOf({ message: "Request failed with status code 500", details: {} })).toBe(
+			"Request failed with status code 500",
+		);
+		expect(errorMessageOf({ message: "Specific", details: { error: "other" } })).toBe("Specific");
+		expect(errorMessageOf({ message: "", details: "plain detail" })).toBe("plain detail");
+		expect(errorMessageOf({ message: "", details: { message: "inner detail" } })).toBe("inner detail");
+		expect(errorMessageOf({})).toBe("An error occurred");
+	});
+
+	it("errorMessageOf unwraps a JSON-string message and leaves others alone", () => {
+		expect(errorMessageOf({ message: '{"message":"inner"}' })).toBe("inner");
+		expect(errorMessageOf({ message: "plain" })).toBe("plain");
+		expect(errorMessageOf({ message: "{not json" })).toBe("{not json");
 	});
 
 	it("handleCliError: 401 status exits AUTH", async () => {

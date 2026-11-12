@@ -44,6 +44,7 @@ jest.mock("../../utils/sdk", () => {
 			Errors: "https://example.com/errors.txt",
 		}),
 		waitForBuild: jest.fn().mockResolvedValue("Completed"),
+		getStatus: jest.fn().mockResolvedValue("Completed"),
 		createFromRepository: jest.fn().mockResolvedValue({ BuildID: "br1" }),
 		cancel: jest.fn().mockResolvedValue(undefined),
 		deleteOne: jest.fn().mockResolvedValue(undefined),
@@ -271,6 +272,155 @@ describe("builds CLI", () => {
 		const program = makeProgram();
 		await expect(program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6"])).rejects.toThrow(/EXIT/);
 		expect(exitCode).toBe(1);
+	});
+
+	it("watch polls the status when the WebSocket fails", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		mockBuildsAPI.getStatus.mockResolvedValueOnce("In Progress").mockResolvedValueOnce("Completed");
+		jest.useFakeTimers();
+		try {
+			const program = makeProgram();
+			const run = program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6a"]);
+			const settled = expect(run).rejects.toThrow(/EXIT/);
+			await jest.advanceTimersByTimeAsync(3000);
+			await settled;
+		} finally {
+			jest.useRealTimers();
+		}
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledTimes(2);
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledWith("b-6a");
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(0);
+	});
+
+	it("watch exits 1 when the polled build is Stopped", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		mockBuildsAPI.getStatus.mockResolvedValueOnce("Stopped");
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6b"])).rejects.toThrow(
+			/EXIT/,
+		);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch exits 1 when the WebSocket fails and the status cannot be fetched", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		mockBuildsAPI.getStatus.mockRejectedValueOnce(new Error("Network Error"));
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6c"])).rejects.toThrow(
+			/EXIT/,
+		);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch exits 1 when the polled build is not finished before the timeout", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		let now = 0;
+		const clock = jest.spyOn(Date, "now").mockImplementation(() => now);
+		// The first poll ends after the 1 s deadline.
+		mockBuildsAPI.getStatus.mockImplementationOnce(async () => {
+			now = 2000;
+			return "In Progress";
+		});
+		const program = makeProgram();
+		try {
+			await expect(
+				program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6d", "--timeout", "1"]),
+			).rejects.toThrow(/EXIT/);
+		} finally {
+			clock.mockRestore();
+		}
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledTimes(1);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch does not poll after the deadline", async () => {
+		let now = 0;
+		const clock = jest.spyOn(Date, "now").mockImplementation(() => now);
+		// The live wait gives up after the 1 s deadline, as the SDK does at its timeout.
+		mockBuildsAPI.waitForBuild.mockImplementationOnce(async () => {
+			now = 2000;
+			throw new Error("Build waiting timeout");
+		});
+		// No status is queued: it must not be asked for, whatever it would say.
+		const program = makeProgram();
+		try {
+			await expect(
+				program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6e", "--timeout", "1"]),
+			).rejects.toThrow(/EXIT/);
+		} finally {
+			clock.mockRestore();
+		}
+		expect(mockBuildsAPI.getStatus).not.toHaveBeenCalled();
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch exits 1 when a finished status arrives after the deadline", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		let now = 0;
+		const clock = jest.spyOn(Date, "now").mockImplementation(() => now);
+		// The poll starts in time, but its answer comes after the 1 s deadline.
+		mockBuildsAPI.getStatus.mockImplementationOnce(async () => {
+			now = 2000;
+			return "Completed";
+		});
+		const program = makeProgram();
+		try {
+			await expect(
+				program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6g", "--timeout", "1"]),
+			).rejects.toThrow(/EXIT/);
+		} finally {
+			clock.mockRestore();
+		}
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledTimes(1);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch exits 1 at the deadline while a status request is still in flight", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		mockBuildsAPI.getStatus.mockImplementationOnce(() => new Promise(() => {}));
+		jest.useFakeTimers();
+		try {
+			const program = makeProgram();
+			const run = program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6h", "--timeout", "1"]);
+			const settled = expect(run).rejects.toThrow(/EXIT/);
+			await jest.advanceTimersByTimeAsync(1000);
+			await settled;
+		} finally {
+			jest.useRealTimers();
+		}
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledTimes(1);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch never sleeps past the deadline between polls", async () => {
+		mockBuildsAPI.waitForBuild.mockRejectedValueOnce(new Error("WebSocket crashed: read ECONNRESET"));
+		let now = 0;
+		const clock = jest.spyOn(Date, "now").mockImplementation(() => now);
+		const timers = jest.spyOn(global, "setTimeout");
+		// 400 ms of the 1 s budget are left after the first poll, none after the second.
+		mockBuildsAPI.getStatus
+			.mockImplementationOnce(async () => {
+				now = 600;
+				return "In Progress";
+			})
+			.mockImplementationOnce(async () => {
+				now = 1000;
+				return "In Progress";
+			});
+		const program = makeProgram();
+		try {
+			await expect(
+				program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6f", "--timeout", "1"]),
+			).rejects.toThrow(/EXIT/);
+		} finally {
+			clock.mockRestore();
+		}
+		const delays = timers.mock.calls.map((call) => call[1]);
+		timers.mockRestore();
+		expect(delays).toContain(400);
+		expect(delays).not.toContain(3000);
+		expect(mockBuildsAPI.getStatus).toHaveBeenCalledTimes(2);
+		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
 	});
 
 	it("get", async () => {

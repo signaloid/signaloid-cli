@@ -58,6 +58,11 @@ describe("users CLI", () => {
 		exitCode = undefined;
 	});
 
+	afterEach(() => {
+		// usageError sets the real exit code; never let it leak into later tests.
+		process.exitCode = undefined;
+	});
+
 	it("me", async () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "users", "me"]);
@@ -79,6 +84,50 @@ describe("users CLI", () => {
 		await program.parseAsync(["node", "x", "users", "update", "--payload-file", "extra.json"]);
 		expect(mockLoadJsonIfPath).toHaveBeenCalledWith("extra.json");
 		expect(mockUsersAPI.update).toHaveBeenCalledWith("u-1", { Preferences: { theme: "dark" } });
+	});
+
+	it("update sends only the given preferences, not the stored ones", async () => {
+		mockUsersAPI.me.mockResolvedValueOnce({
+			UserID: "u-1",
+			Preferences: { UpdatedAt: 1, EditorTheme: "dark", PlatformTheme: "light", Editor_Layout: "split" },
+		});
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update", "--pref", "Editor_Theme=dark"]);
+		expect(mockUsersAPI.update).toHaveBeenCalledWith("u-1", { Preferences: { Editor_Theme: "dark" } });
+	});
+
+	it("update drops UpdatedAt from a payload file", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce({ Preferences: { UpdatedAt: 5, Editor_Theme: "dark" } });
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update", "--payload-file", "me.json"]);
+		expect(mockUsersAPI.update).toHaveBeenCalledWith("u-1", { Preferences: { Editor_Theme: "dark" } });
+	});
+
+	it("update --remove alone sends no preferences", async () => {
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update", "--remove", "Editor_Execution_Core"]);
+		expect(mockUsersAPI.update).toHaveBeenCalledWith("u-1", {}, { remove: ["Editor_Execution_Core"] });
+	});
+
+	it("update --role alone sends no preferences", async () => {
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update", "--role", "engineering"]);
+		expect(mockUsersAPI.update).toHaveBeenCalledWith("u-1", { Role: "engineering" });
+	});
+
+	it("update with no options is a usage error", async () => {
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update"]);
+		expect(process.exitCode).toBe(2);
+		expect(mockUsersAPI.me).not.toHaveBeenCalled();
+		expect(mockUsersAPI.update).not.toHaveBeenCalled();
+	});
+
+	it.each([["Editor_Theme"], ["=dark"]])("update --pref %s (not key=value) is a usage error", async (pref) => {
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "users", "update", "--pref", pref]);
+		expect(process.exitCode).toBe(2);
+		expect(mockUsersAPI.update).not.toHaveBeenCalled();
 	});
 
 	it("logs with from/to and limit", async () => {

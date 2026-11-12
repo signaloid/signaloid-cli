@@ -29,7 +29,8 @@ import users from "./commands/api/users";
 import webhooks from "./commands/api/webhooks";
 import github from "./commands/api/github";
 import { useGhStyleHelp } from "./utils/help-formatter";
-import { setVerbosity } from "./utils/verbosity";
+import { printDebugError, setDebug, setVerbosity } from "./utils/verbosity";
+import { errorMessageOf } from "./utils/error-handler";
 
 // Read version from package.json so --version always matches the published release.
 const { version } = require("../../package.json") as { version: string };
@@ -40,7 +41,7 @@ program
 	.name("signaloid-cli")
 	.description("Signaloid CLI — Command-line interface for the Signaloid Cloud Compute Engine")
 	.version(version)
-	.option("-d, --debug", "Output extra debugging")
+	.option("-d, --debug", "Print error details (stack, HTTP request and response) on stderr")
 	.option("--json", "Machine-readable JSON output")
 	.option("--verbosity <n>", "Output verbosity level: 0=silent, 1=errors only, 2=full", "2")
 	.helpCommand("help [command]", "Display help for command");
@@ -55,9 +56,9 @@ Use ${chalk.cyan("signaloid-cli <command> --help")} for more information about a
 Read the manual at ${chalk.underline("https://docs.signaloid.io/docs/api/signaloid-cli/intro")}
 `;
 
-
 program.hook("preAction", (_thisCommand, actionCommand) => {
 	setVerbosity(parseInt(program.opts().verbosity ?? "2", 10));
+	setDebug(Boolean(program.opts().debug));
 	if (program.opts().json) {
 		actionCommand.setOptionValue("format", "json");
 	}
@@ -119,6 +120,7 @@ program.parseAsync(process.argv).catch((error: any) => {
 	if (error?.name === "ExitPromptError") {
 		process.exit(EXIT_CODES.SUCCESS);
 	}
-	console.error(chalk.red(error?.stderr || error?.shortMessage || error?.message || String(error)));
+	console.error(chalk.red(error?.stderr || error?.shortMessage || errorMessageOf(error)));
+	printDebugError(error);
 	process.exit(EXIT_CODES.ERROR);
 });

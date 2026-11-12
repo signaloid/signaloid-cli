@@ -268,7 +268,7 @@ signaloid-cli builds output-urls --build-id <id>
 
 #### `builds watch`
 
-Wait for a build to finish. Exits `0` on success, `1` on failure or timeout.
+Wait for a build to finish. Exits `0` on success, `1` on failure or timeout. If the live (WebSocket) connection fails, it polls the build status until the timeout.
 
 ```
 signaloid-cli builds watch --build-id <id> [--timeout <sec>]

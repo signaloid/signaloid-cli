@@ -296,7 +296,17 @@ export default function webhooks(program: Command) {
 			const spinner = createSpinner("Computing webhook stats...");
 			try {
 				const client = makeClient(await loadConfig());
-				const res = await client.webhooks.getStats();
+				// The same stats as the SDK's getStats(), but from every page: in
+				// @signaloid/scce-sdk 5.0.0, getStats() reads only the first.
+				// TODO: replace with client.webhooks.getStats() once a release reads every page.
+				const webhooks = await client.webhooks.listAll();
+				const res = {
+					total: webhooks.length,
+					active: webhooks.filter((w) => w.Status === "active").length,
+					disabled: webhooks.filter((w) => w.Status === "disabled").length,
+					withFailures: webhooks.filter((w) => w.FailureCount > 0).length,
+					recentlyFailed: webhooks.filter((w) => w.LastDeliveryStatus?.startsWith("failed")),
+				};
 				spinner.succeed();
 
 				const format = (opts.format || "json") as OutputFormat;

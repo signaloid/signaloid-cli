@@ -35,6 +35,7 @@ jest.mock("chalk", () => ({
 describe("auth commands", () => {
 	let program: Command;
 	let mockClient: any;
+	const origIsTTY = process.stdin.isTTY;
 
 	beforeEach(() => {
 		jest.clearAllMocks();
@@ -73,6 +74,7 @@ describe("auth commands", () => {
 
 	afterEach(() => {
 		jest.restoreAllMocks();
+		(process.stdin as any).isTTY = origIsTTY;
 	});
 
 	describe("login command", () => {
@@ -128,10 +130,50 @@ describe("auth commands", () => {
 		});
 
 		it("prompts for the key when --api-key has no value", async () => {
+			(process.stdin as any).isTTY = true;
 			(inquirer.prompt as unknown as jest.Mock).mockResolvedValueOnce({ apiKey: "scce_prompted" });
 			await program.parseAsync(["node", "x", "auth", "login", "--api-key"]);
 			expect(inquirer.prompt).toHaveBeenCalledTimes(1);
 			expect(saveConfig).toHaveBeenCalledWith({ auth: { mode: "apikey", apiKey: "scce_prompted" } });
+		});
+	});
+
+	describe("login without a terminal", () => {
+		beforeEach(() => {
+			auth(program);
+			(process.stdin as any).isTTY = false;
+		});
+
+		it.each([[[]], [["--api-key"]], [["--email", "user@example.com"]], [["--password", "p"]]])(
+			"exits 2 instead of prompting (args %j)",
+			async (args) => {
+				await expect(program.parseAsync(["node", "x", "auth", "login", ...args])).rejects.toThrow(
+					/Process exited with code/,
+				);
+				// Exactly one exit: a second one from the catch block would replace the code 2.
+				expect(process.exit).toHaveBeenCalledTimes(1);
+				expect(process.exit).toHaveBeenCalledWith(2);
+				expect(inquirer.prompt).not.toHaveBeenCalled();
+				expect(saveConfig).not.toHaveBeenCalled();
+			},
+		);
+
+		it("still logs in with --api-key <key>", async () => {
+			await program.parseAsync(["node", "x", "auth", "login", "--api-key", "scce_good"]);
+			expect(saveConfig).toHaveBeenCalledWith({ auth: { mode: "apikey", apiKey: "scce_good" } });
+		});
+	});
+
+	describe("logout", () => {
+		beforeEach(() => {
+			auth(program);
+		});
+
+		it.each(["jwt", "email", "apikey"])("clears %s credentials without calling the SDK logout", async (mode) => {
+			(loadConfig as jest.Mock).mockResolvedValue({ auth: { mode, token: "t", apiKey: "k" } });
+			await program.parseAsync(["node", "x", "auth", "logout"]);
+			expect(saveConfig).toHaveBeenCalledWith({ auth: undefined });
+			expect(mockClient.auth.logout).not.toHaveBeenCalled();
 		});
 	});
 
@@ -159,7 +201,7 @@ describe("auth commands", () => {
 			const logoutCmd = authCmd?.commands.find((cmd) => cmd.name() === "logout");
 
 			expect(logoutCmd).toBeDefined();
-			expect(logoutCmd?.description()).toBe("Clear local auth and sign out (if email)");
+			expect(logoutCmd?.description()).toBe("Clear the locally stored credentials");
 		});
 	});
 });
