@@ -1,8 +1,8 @@
 import { Command, Option } from "commander";
-import type { CreateSourceBuildRequest } from "@signaloid/scce-sdk";
+import type { CreateSourceBuildRequest, SignaloidClient } from "@signaloid/scce-sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createSpinner } from "../../utils/spinner";
+import { createSpinner, Spinner } from "../../utils/spinner";
 import chalk from "chalk";
 import { loadConfig } from "../../utils/config";
 import { writeBinary } from "../../utils/fsx";
@@ -28,6 +28,56 @@ import { parsePositiveInt } from "../../utils/validation";
 import { usageError } from "../../utils/exit-codes";
 
 const TERMINAL_BUILD_STATES = new Set(["completed", "cancelled", "stopped"]);
+const WATCH_POLL_INTERVAL_MS = 3000;
+
+/**
+ * Waits until a build reaches a terminal state and returns that state.
+ *
+ * Uses the SDK's WebSocket wait. If that fails, polls the build status until the timeout,
+ * because the SDK does not retry a WebSocket that drops before it connects.
+ * Throws if the status cannot be fetched or the build is not finished in time.
+ */
+async function waitForBuildStatus(
+	client: SignaloidClient,
+	buildId: string,
+	timeoutSec: number,
+	spinner: Spinner,
+): Promise<string> {
+	const deadline = Date.now() + timeoutSec * 1000;
+	try {
+		return await client.builds.waitForBuild(buildId, { timeoutSec });
+	} catch (e: any) {
+		spinner.text = `Live updates failed (${e?.message || e}). Polling build ${buildId}...`;
+	}
+	let status: string | undefined;
+	// Negated so that a NaN --timeout also stops.
+	const timedOut = () => !(Date.now() < deadline);
+	const timeoutError = () =>
+		new Error(
+			`Timed out after ${timeoutSec} s waiting for build ${buildId}${status ? ` (status: ${status})` : ""}`,
+		);
+	// A request still in flight at the deadline ends the wait with the timeout error.
+	const beforeDeadline = <T>(request: Promise<T>) =>
+		new Promise<T>((resolve, reject) => {
+			const timer = setTimeout(() => reject(timeoutError()), Math.max(0, deadline - Date.now()));
+			request.then(resolve, reject).finally(() => clearTimeout(timer));
+		});
+	for (;;) {
+		// Checked before and after each poll, so that a build only counts if it is seen finished in time.
+		if (timedOut()) {
+			throw timeoutError();
+		}
+		status = await beforeDeadline(client.builds.getStatus(buildId));
+		if (timedOut()) {
+			throw timeoutError();
+		}
+		if (TERMINAL_BUILD_STATES.has(String(status || "").toLowerCase())) {
+			return status;
+		}
+		const sleepMs = Math.min(WATCH_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
+		await new Promise((resolve) => setTimeout(resolve, sleepMs));
+	}
+}
 
 /**
  * Registers the 'builds' command and subcommands for managing Signaloid builds.
@@ -282,9 +332,7 @@ export default function builds(program: Command) {
 			const spinner = createSpinner(`Waiting for build ${buildId}...`);
 			try {
 				const client = makeClient(await loadConfig());
-				const status = await client.builds.waitForBuild(buildId, {
-					timeoutSec: opts.timeout,
-				});
+				const status = await waitForBuildStatus(client, buildId, opts.timeout ?? 60, spinner);
 				const final = String(status || "").toLowerCase();
 				spinner.succeed(`Build finished: ${status}`);
 				process.exit(TERMINAL_BUILD_STATES.has(final) && final === "completed" ? 0 : 1);

@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { httpStatusOf } from "./error-handler";
+import { httpStatusOf } from "./http-error";
 import { makeClient } from "./sdk";
 import { printError } from "./verbosity";
 

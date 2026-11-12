@@ -5,11 +5,24 @@ import chalk from "chalk";
 import { loadConfig, saveConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { validateEmail, validateNonEmptyString } from "../../utils/validation";
-import { handleCliError } from "../../utils/error-handler";
+import { errorMessageOf, handleCliError } from "../../utils/error-handler";
 import { displayResource, OutputFormat } from "../../utils/output";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
-import { printError, printInfo, printTip, printData } from "../../utils/verbosity";
+import { printDebugError, printError, printInfo, printTip, printData } from "../../utils/verbosity";
 import { EXIT_CODES } from "../../utils/exit-codes";
+
+/**
+ * Prompts need a terminal. Without one, inquirer cannot ask and the login would end as
+ * "Cancelled." with exit 0, which a script cannot tell from success. Exit 2 instead.
+ */
+function requireInteractive(): void {
+	if (!process.stdin.isTTY) {
+		printError(
+			"Cannot prompt without a terminal. Pass --api-key <key>, or --email <email> and --password <password>.",
+		);
+		process.exit(EXIT_CODES.USAGE);
+	}
+}
 
 /**
  * Registers the 'auth' command and subcommands for authentication management.
@@ -20,7 +33,7 @@ import { EXIT_CODES } from "../../utils/exit-codes";
  * Available subcommands:
  * - login: Authenticate using API key or email/password credentials
  * - whoami: Display current authenticated user information
- * - logout: Clear local authentication and sign out
+ * - logout: Clear the locally stored credentials
  *
  * @param program - The Commander program instance to register commands with
  *
@@ -47,11 +60,19 @@ export default function auth(program: Command) {
 			const cfg = await loadConfig();
 			const spinner = createLazySpinner(); // start later, after prompts
 
-			try {
-				let apiKeyOpt = opts.apiKey as string | boolean | undefined;
-				let emailOpt = opts.email as string | boolean | undefined;
-				let password = opts.password as string | undefined;
+			let apiKeyOpt = opts.apiKey as string | boolean | undefined;
+			let emailOpt = opts.email as string | boolean | undefined;
+			let password = opts.password as string | undefined;
 
+			// Every prompt below needs a terminal. Check before the try, so that the exit is not
+			// caught and turned into "Authentication failed" with another exit code.
+			// No prompt only for --api-key <key>, or for --email <email> with --password.
+			const canSkipPrompts =
+				typeof apiKeyOpt === "string" ||
+				(apiKeyOpt === undefined && typeof emailOpt === "string" && Boolean(password));
+			if (!canSkipPrompts) requireInteractive();
+
+			try {
 				//
 				// 0. If no options at all → ask user which method to use
 				//
@@ -265,7 +286,8 @@ export default function auth(program: Command) {
 					return;
 				}
 				spinner.fail("Authentication failed");
-				printError(chalk.red(e?.message || String(e)));
+				printError(chalk.red(errorMessageOf(e)));
+				printDebugError(e);
 				process.exit(EXIT_CODES.ERROR);
 			}
 		});
@@ -291,22 +313,27 @@ export default function auth(program: Command) {
 			}
 		});
 
+	// The CLI stores only an API key or an ID token, so it has no session it could end on
+	// the server: the key stays valid, and the token until it expires.
 	cmd.command("logout")
-		.description("Clear local auth and sign out (if email)")
+		.description("Clear the locally stored credentials")
 		.action(async () => {
 			const spinner = createSpinner("Logging out...");
 			try {
 				const cfg = await loadConfig();
-				if (cfg.auth?.mode === "email") {
-					const client = makeClient(cfg);
-					await client.auth.logout();
-				}
+				const mode = cfg.auth?.mode;
 				cfg.auth = undefined;
 				await saveConfig(cfg);
 				spinner.succeed("Logged out locally");
+				const tip = {
+					apikey: "The API key itself stays valid. To revoke it, log in again and run: signaloid-cli keys delete --key-id <id>",
+					jwt: "The session token stays valid until it expires. To end every session, log in again and run: signaloid-cli users logout-all --user-id <id>",
+				}[mode as string];
+				if (tip) printTip(chalk.cyan(tip));
 			} catch (e: any) {
 				spinner.fail("Logout failed");
-				printError(chalk.red(e?.message || String(e)));
+				printError(chalk.red(errorMessageOf(e)));
+				printDebugError(e);
 				process.exit(EXIT_CODES.ERROR);
 			}
 		});
