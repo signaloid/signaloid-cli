@@ -46,8 +46,8 @@ jest.mock("../../utils/sdk", () => {
 		waitForBuild: jest.fn().mockResolvedValue("Completed"),
 		getStatus: jest.fn().mockResolvedValue("Completed"),
 		createFromRepository: jest.fn().mockResolvedValue({ BuildID: "br1" }),
-		cancel: jest.fn().mockResolvedValue(undefined),
-		deleteOne: jest.fn().mockResolvedValue(undefined),
+		cancel: jest.fn().mockResolvedValue({ message: "Build cancellation requested." }),
+		deleteOne: jest.fn().mockResolvedValue({ message: "Build deleted successfully." }),
 		updateOne: jest.fn().mockResolvedValue({ BuildID: "b1", IsPublic: true }),
 		getVariables: jest.fn().mockResolvedValue({ BuildID: "b1", Variables: [], Count: 0 }),
 		listTasks: jest.fn().mockResolvedValue({ Tasks: [], Count: 0 }),
@@ -169,6 +169,27 @@ describe("builds CLI", () => {
 				CoreID: "core-123",
 				Arguments: "--fast",
 			},
+			undefined,
+		);
+	});
+
+	it("create:source sends --max-duration as MaxDurationSeconds", async () => {
+		mockReadFile.mockResolvedValueOnce("int main(){}");
+		const program = makeProgram();
+		await program.parseAsync([
+			"node",
+			"x",
+			"builds",
+			"create:source",
+			"--file",
+			"main.c",
+			"--lang",
+			"C",
+			"--max-duration",
+			"900",
+		]);
+		expect(mockBuildsAPI.createFromSourceCode).toHaveBeenCalledWith(
+			{ Code: "int main(){}", Language: "C", MaxDurationSeconds: 900 },
 			undefined,
 		);
 	});
@@ -300,6 +321,16 @@ describe("builds CLI", () => {
 			/EXIT/,
 		);
 		expect((process.exit as unknown as jest.Mock).mock.calls[0][0]).toBe(1);
+	});
+
+	it("watch fetches the build to show why it stopped", async () => {
+		mockBuildsAPI.waitForBuild.mockResolvedValueOnce("Stopped");
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "builds", "watch", "--build-id", "b-6s"])).rejects.toThrow(
+			/EXIT/,
+		);
+		expect(mockBuildsAPI.getOne).toHaveBeenCalledWith("b-6s");
+		expect(exitCode).toBe(1);
 	});
 
 	it("watch exits 1 when the WebSocket fails and the status cannot be fetched", async () => {
@@ -448,6 +479,33 @@ describe("builds CLI", () => {
 			"r_123",
 			{ CoreID: "core-9", Arguments: "--foo" },
 			true,
+		);
+	});
+
+	it("create:repo sends --max-duration as MaxDurationSeconds", async () => {
+		const program = makeProgram();
+		await program.parseAsync([
+			"node",
+			"x",
+			"builds",
+			"create:repo",
+			"--repo-id",
+			"r_125",
+			"--max-duration",
+			"28800",
+		]);
+		expect(mockBuildsAPI.createFromRepository).toHaveBeenCalledWith("r_125", { MaxDurationSeconds: 28800 }, false);
+	});
+
+	it("create:repo refuses a --max-duration of 0 before calling the API", async () => {
+		const program = makeProgram();
+		await expect(
+			program.parseAsync(["node", "x", "builds", "create:repo", "--repo-id", "r_126", "--max-duration", "0"]),
+		).rejects.toThrow(/28800/);
+		expect(mockBuildsAPI.createFromRepository).not.toHaveBeenCalledWith(
+			"r_126",
+			expect.anything(),
+			expect.anything(),
 		);
 	});
 

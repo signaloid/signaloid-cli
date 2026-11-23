@@ -29,11 +29,12 @@ import users from "./commands/api/users";
 import webhooks from "./commands/api/webhooks";
 import github from "./commands/api/github";
 import { useGhStyleHelp } from "./utils/help-formatter";
-import { printDebugError, setDebug, setVerbosity } from "./utils/verbosity";
+import { getVerbosity, printDebugError, setDebug, setVerbosity } from "./utils/verbosity";
 import { errorMessageOf } from "./utils/error-handler";
+import { startUpdateCheck } from "./utils/update-check";
 
 // Read version from package.json so --version always matches the published release.
-const { version } = require("../../package.json") as { version: string };
+const { name, version } = require("../../package.json") as { name: string; version: string };
 
 const program = new Command();
 
@@ -62,6 +63,16 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 	if (program.opts().json) {
 		actionCommand.setOptionValue("format", "json");
 	}
+	// Notify from the previous run's cache, refresh in the background.
+	// Each build checks its own package. Silent in non-interactive sessions.
+	startUpdateCheck({
+		currentVersion: version,
+		packageName: name,
+		jsonOutput:
+			Boolean(program.opts().json) ||
+			(actionCommand.getOptionValueSource("format") === "cli" && actionCommand.opts().format === "json"),
+		verbosity: getVerbosity(),
+	});
 });
 
 auth(program);

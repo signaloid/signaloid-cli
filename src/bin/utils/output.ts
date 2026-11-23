@@ -238,6 +238,7 @@ export const AVAILABLE_COLUMNS = {
 		updated: { key: "UpdatedAt", header: "Updated", width: 25 },
 		duration: { key: "_duration", header: "Duration", width: 12 },
 		coreSpecs: { key: "BuildCoreSpecs", header: "Core Specs", width: 40 },
+		maxDuration: { key: "MaxDurationSeconds", header: "Max Duration (s)", width: 18 },
 	},
 	tasks: {
 		id: { key: "TaskID", header: "Task ID", width: 30 },
@@ -246,6 +247,7 @@ export const AVAILABLE_COLUMNS = {
 		created: { key: "CreatedAt", header: "Created", width: 25 },
 		updated: { key: "UpdatedAt", header: "Updated", width: 25 },
 		duration: { key: "_duration", header: "Duration", width: 12 },
+		maxDuration: { key: "MaxDurationSeconds", header: "Max Duration (s)", width: 18 },
 	},
 	cores: {
 		id: { key: "CoreID", header: "Core ID", width: 30 },

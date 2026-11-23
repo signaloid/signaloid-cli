@@ -1,5 +1,9 @@
 import { Command, Option } from "commander";
-import type { CreateSourceBuildRequest, SignaloidClient } from "@signaloid/scce-sdk";
+import type {
+	CreateRepositoryBuildRequest,
+	CreateSourceBuildRequest,
+	SignaloidClient,
+} from "@signaloid/scce-sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createSpinner, Spinner } from "../../utils/spinner";
@@ -24,7 +28,8 @@ import {
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
-import { parsePositiveInt } from "../../utils/validation";
+import { MAX_DURATION_HELP, parseMaxDuration, parsePositiveInt } from "../../utils/validation";
+import { describeFinalStatus } from "../../utils/stop-reason";
 import { usageError } from "../../utils/exit-codes";
 
 const TERMINAL_BUILD_STATES = new Set(["completed", "cancelled", "stopped"]);
@@ -103,7 +108,7 @@ async function waitForBuildStatus(
  * @example
  * ```
  * signaloid-cli builds list --status Completed
- * signaloid-cli builds create:source --file main.c --lang C --core core-123
+ * signaloid-cli builds create:source --file main.c --lang C --core-id core-123 --max-duration 600
  * signaloid-cli builds watch --build-id build-456
  * signaloid-cli builds output --build-id build-456 --out ./output.txt
  * ```
@@ -186,6 +191,7 @@ export default function builds(program: Command) {
 		.option("--public", "Mark the build as publicly accessible")
 		.option("--discover-variables", "Request the build to discover traceable variables (not on r7i cores)")
 		.option("--config-mk <path>", "Path to a config.mk file")
+		.option("--max-duration <sec>", MAX_DURATION_HELP, parseMaxDuration)
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating build (source code)...");
 			try {
@@ -216,6 +222,7 @@ export default function builds(program: Command) {
 					}
 				}
 				if (opts.public === true) payload.IsPublic = true;
+				if (opts.maxDuration !== undefined) payload.MaxDurationSeconds = opts.maxDuration;
 				if (typeof opts.configMk === "string") {
 					const configMkAbs = path.resolve(String(opts.configMk));
 					payload.ConfigMk = await fs.readFile(configMkAbs, "utf-8");
@@ -224,7 +231,7 @@ export default function builds(program: Command) {
 				const discoverVars = opts.discoverVariables === true ? true : undefined;
 
 				const res = await client.builds.createFromSourceCode(payload, discoverVars);
-				spinner.succeed("Build created");
+				spinner.succeed(res.message || "Build created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Build creation failed");
@@ -334,7 +341,9 @@ export default function builds(program: Command) {
 				const client = makeClient(await loadConfig());
 				const status = await waitForBuildStatus(client, buildId, opts.timeout ?? 60, spinner);
 				const final = String(status || "").toLowerCase();
-				spinner.succeed(`Build finished: ${status}`);
+				spinner.succeed(
+					`Build finished: ${await describeFinalStatus(status, () => client.builds.getOne(buildId))}`,
+				);
 				process.exit(TERMINAL_BUILD_STATES.has(final) && final === "completed" ? 0 : 1);
 			} catch (e: any) {
 				spinner.fail("Failed while waiting for build");
@@ -367,7 +376,7 @@ export default function builds(program: Command) {
 			}
 		});
 
-	// signaloid-cli builds create:repo --repo-id r_123 --core-id core-123 --args "--foo" --discover-vars [--trace-variables <json>] [--data-sources <json>] [--public|--private]
+	// signaloid-cli builds create:repo --repo-id r_123 --core-id core-123 --args "--foo" --discover-vars [--trace-variables <json>] [--data-sources <json>] [--max-duration <sec>] [--public|--private]
 	cmd.command("create:repo")
 		.description("Create a build from a repository")
 		.requiredOption("--repo-id <id>", "Repository ID")
@@ -383,6 +392,7 @@ export default function builds(program: Command) {
 			"--data-sources <json>",
 			'JSON array of DataSource objects, e.g. \'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]\'',
 		)
+		.option("--max-duration <sec>", MAX_DURATION_HELP, parseMaxDuration)
 		.addOption(new Option("--public", "Mark the resulting build as public").conflicts("private"))
 		.addOption(new Option("--private", "Mark the resulting build as private (default)").conflicts("public"))
 		.action(async (opts) => {
@@ -390,13 +400,7 @@ export default function builds(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 
-				const payload: {
-					CoreID?: string;
-					Arguments?: string;
-					TraceVariables?: any[];
-					DataSources?: any[];
-					IsPublic?: boolean;
-				} = {};
+				const payload: CreateRepositoryBuildRequest = {};
 				if (opts.coreId) payload.CoreID = opts.coreId;
 				if (typeof opts.args === "string") payload.Arguments = opts.args;
 				if (typeof opts.traceVariables === "string") {
@@ -417,6 +421,7 @@ export default function builds(program: Command) {
 				}
 				if (opts.public) payload.IsPublic = true;
 				else if (opts.private) payload.IsPublic = false;
+				if (opts.maxDuration !== undefined) payload.MaxDurationSeconds = opts.maxDuration;
 
 				const res = await client.builds.createFromRepository(
 					String(opts.repoId),
@@ -424,7 +429,7 @@ export default function builds(program: Command) {
 					!!(opts.discoverVariables || opts.discoverVars),
 				);
 
-				spinner.succeed("Build created");
+				spinner.succeed(res.message || "Build created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Repo build failed");
@@ -451,7 +456,7 @@ export default function builds(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.builds.updateOne(buildId, { IsPublic: isPublic });
-				spinner.succeed("Build updated");
+				spinner.succeed(res.message || "Build updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update build");
@@ -568,8 +573,8 @@ export default function builds(program: Command) {
 			const spinner = createSpinner(`Cancelling build ${buildId}...`);
 			try {
 				const client = makeClient(await loadConfig());
-				await client.builds.cancel(buildId);
-				spinner.succeed("Build cancelled");
+				const res = await client.builds.cancel(buildId);
+				spinner.succeed(res.message || "Build cancelled");
 				printData(JSON.stringify({ BuildID: buildId, cancelled: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to cancel build");
@@ -586,8 +591,8 @@ export default function builds(program: Command) {
 			const spinner = createSpinner(`Deleting build ${buildId}...`);
 			try {
 				const client = makeClient(await loadConfig());
-				await client.builds.deleteOne(buildId);
-				spinner.succeed("Build deleted");
+				const res = await client.builds.deleteOne(buildId);
+				spinner.succeed(res.message || "Build deleted");
 				printData(JSON.stringify({ BuildID: buildId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete build");

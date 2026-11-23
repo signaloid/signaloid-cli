@@ -19,7 +19,11 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
 		if (httpStatusOf(error) !== undefined) {
 			return false;
 		}
-		printError(chalk.red("\nError: Could not connect to the API server. Please check your network connection."));
+		const message =
+			error?.code === "API_NETWORK_ERROR" || error?.code === "API_TIMEOUT"
+				? error.message
+				: "Could not connect to the API server. Please check your network connection.";
+		printError(chalk.red(`\nError: ${message}`));
 		return false;
 	}
 }

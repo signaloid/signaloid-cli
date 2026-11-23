@@ -206,7 +206,7 @@ export default function webhooks(program: Command) {
 						}
 					: created;
 
-				spinner.succeed("Webhook created");
+				spinner.succeed(created.message || "Webhook created");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
@@ -258,7 +258,7 @@ export default function webhooks(program: Command) {
 				Object.assign(payload, await loadWebhookPayloadFile(opts.payloadFile));
 
 				const res = await client.webhooks.update(id, payload as UpdateWebhookRequest);
-				spinner.succeed("Webhook updated");
+				spinner.succeed(res.message || "Webhook updated");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
@@ -280,8 +280,8 @@ export default function webhooks(program: Command) {
 			const spinner = createSpinner("Deleting webhook...");
 			try {
 				const client = makeClient(await loadConfig());
-				await client.webhooks.delete(id);
-				spinner.succeed("Webhook deleted");
+				const res = await client.webhooks.delete(id);
+				spinner.succeed(res.message || "Webhook deleted");
 				printData(JSON.stringify({ WebhookID: id, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete webhook");
@@ -331,7 +331,7 @@ export default function webhooks(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.enable(id);
-				spinner.succeed("Webhook enabled");
+				spinner.succeed(res.message || "Webhook enabled");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
@@ -355,7 +355,7 @@ export default function webhooks(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.webhooks.disable(id);
-				spinner.succeed("Webhook disabled");
+				spinner.succeed(res.message || "Webhook disabled");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {

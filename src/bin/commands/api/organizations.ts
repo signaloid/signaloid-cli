@@ -55,7 +55,7 @@ export default function organizations(program: Command) {
 				};
 				if (opts.dedicatedInstance) payload.DedicatedInstanceName = opts.dedicatedInstance;
 				const res = await client.organizations.create(payload);
-				spinner.succeed("Organization created");
+				spinner.succeed(res.message || "Organization created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
@@ -108,7 +108,7 @@ export default function organizations(program: Command) {
 					Email: opts.email,
 					Role: opts.role,
 				});
-				spinner.succeed("User invited");
+				spinner.succeed(res.message || "User invited");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
@@ -129,7 +129,7 @@ export default function organizations(program: Command) {
 				const res = await client.organizations.updateUserRole(String(opts.orgId), String(opts.userId), {
 					Role: opts.role,
 				});
-				spinner.succeed("Role updated");
+				spinner.succeed(res.message || "Role updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");
@@ -147,7 +147,7 @@ export default function organizations(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.organizations.removeUser(String(opts.orgId), String(opts.identifier));
-				spinner.succeed("User removed");
+				spinner.succeed(res.message || "User removed");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed");

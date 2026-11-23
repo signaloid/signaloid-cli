@@ -13,8 +13,15 @@ jest.mock("./config", () => ({
 	loadConfig: jest.fn().mockResolvedValue({ auth: { mode: "apikey" } }),
 }));
 
-import { withErrorHandling, withErrorHandlingCustom, handleCliError, errorMessageOf } from "./error-handler";
+import {
+	withErrorHandling,
+	withErrorHandlingCustom,
+	handleCliError,
+	errorMessageOf,
+	API_KEYS_URL,
+} from "./error-handler";
 import { EXIT_CODES } from "./exit-codes";
+import { loadConfig } from "./config";
 
 describe("error-handler utils", () => {
 	const origExit = process.exit;
@@ -153,6 +160,32 @@ describe("error-handler utils", () => {
 		const { notLoggedInError } = jest.requireActual("./sdk");
 		await handleCliError(notLoggedInError("Not authenticated. Run `signaloid-cli auth login` first."));
 		expect(mockExit).toHaveBeenCalledWith(EXIT_CODES.AUTH);
+	});
+
+	it("handleCliError: a session the SDK cannot read (AUTH_SESSION_FAILED) exits AUTH", async () => {
+		const e = { name: "SdkError", code: "AUTH_SESSION_FAILED", message: "Your session expired. Sign in again." };
+		await handleCliError(e);
+		expect(mockExit).toHaveBeenCalledWith(EXIT_CODES.AUTH);
+	});
+
+	describe("handleCliError: login tip", () => {
+		const unauthorized = { name: "SdkError", code: "API_UNAUTHORIZED", message: "Invalid API key.", status: 401 };
+		const printed = () => mockErr.mock.calls.flat().join("\n");
+
+		it("sends a rejected API key to the API keys page, not to `keys create`", async () => {
+			(loadConfig as jest.Mock).mockResolvedValueOnce({ auth: { mode: "apikey" } });
+			await handleCliError(unauthorized);
+			expect(printed()).toContain(API_KEYS_URL);
+			expect(printed()).toContain("signaloid-cli auth login --api-key <new-key>");
+			expect(printed()).not.toContain("keys create");
+		});
+
+		it.each(["jwt", undefined])("offers an API key from the web app (auth mode %s)", async (mode) => {
+			(loadConfig as jest.Mock).mockResolvedValueOnce(mode ? { auth: { mode } } : {});
+			await handleCliError(unauthorized);
+			expect(printed()).toContain(API_KEYS_URL);
+			expect(printed()).toContain("signaloid-cli auth login --api-key");
+		});
 	});
 
 	it("handleCliError: other errors exit ERROR", async () => {

@@ -185,7 +185,7 @@ export default function files(program: Command) {
 				}
 
 				const res = await client.files.upload(opts.path, content);
-				spinner.succeed("File uploaded");
+				spinner.succeed(res.message || "File uploaded");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to upload");
@@ -202,7 +202,7 @@ export default function files(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.files.createDirectory(p);
-				spinner.succeed("Directory created");
+				spinner.succeed(res.message || "Directory created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create directory");
@@ -231,7 +231,7 @@ export default function files(program: Command) {
 					recursive: Boolean(opts.recursive),
 					directory: Boolean(opts.directory),
 				});
-				spinner.succeed("Deleted");
+				spinner.succeed(res.message || "Deleted");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete");

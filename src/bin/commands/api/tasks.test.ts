@@ -5,11 +5,12 @@ jest.mock("../../utils/config", () => ({
 	loadConfig: jest.fn().mockResolvedValue({}),
 }));
 
+const mockSucceed = jest.fn();
 jest.mock("ora", () => ({
 	__esModule: true,
 	default: () => ({
-		start: () => ({ succeed: () => ({}) as any, fail: () => ({}) as any }),
-		succeed: () => ({}) as any,
+		start: () => ({ succeed: mockSucceed, fail: () => ({}) as any }),
+		succeed: mockSucceed,
 		fail: () => ({}) as any,
 	}),
 }));
@@ -42,8 +43,8 @@ jest.mock("../../utils/sdk", () => {
 		getStatus: jest.fn().mockResolvedValue("Completed"),
 		getOutputURLs: jest.fn().mockResolvedValue({ Stdout: "https://stdout", Stderr: "https://stderr" }),
 		getOutput: jest.fn().mockResolvedValue("OUTPUT"),
-		cancel: jest.fn().mockResolvedValue(undefined),
-		deleteOne: jest.fn().mockResolvedValue(undefined),
+		cancel: jest.fn().mockResolvedValue({ message: "Task cancellation requested." }),
+		deleteOne: jest.fn().mockResolvedValue({ message: "Task deleted successfully." }),
 		waitForTask: jest.fn().mockResolvedValue("completed"),
 	};
 	return {
@@ -112,6 +113,32 @@ describe("tasks CLI", () => {
 		const program = makeProgram();
 		await program.parseAsync(["node", "x", "tasks", "create", "--build-id", "b-2", "--param", "Arguments=INL"]);
 		expect(mockTasksAPI.createTask).toHaveBeenCalledWith("b-2", { Arguments: "INL" });
+	});
+
+	it("create sends --max-duration as MaxDurationSeconds, over the params file", async () => {
+		mockLoadJsonIfPath.mockResolvedValueOnce({ MaxDurationSeconds: 60 });
+		const program = makeProgram();
+		await program.parseAsync([
+			"node",
+			"x",
+			"tasks",
+			"create",
+			"--build-id",
+			"b-3",
+			"--params-file",
+			"file.json",
+			"--max-duration",
+			"600",
+		]);
+		expect(mockTasksAPI.createTask).toHaveBeenCalledWith("b-3", { MaxDurationSeconds: 600 });
+	});
+
+	it("create refuses a --max-duration above 28800 before calling the API", async () => {
+		const program = makeProgram();
+		await expect(
+			program.parseAsync(["node", "x", "tasks", "create", "--build-id", "b-4", "--max-duration", "28801"]),
+		).rejects.toThrow(/28800/);
+		expect(mockTasksAPI.createTask).not.toHaveBeenCalled();
 	});
 
 	it("list with filters and limit", async () => {
@@ -223,11 +250,38 @@ describe("tasks CLI", () => {
 		expect(mockTasksAPI.deleteOne).toHaveBeenCalledWith("t-7");
 	});
 
+	it("cancel shows the API's message", async () => {
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "tasks", "cancel", "--task-id", "t-6"]);
+		expect(mockSucceed).toHaveBeenCalledWith("Task cancellation requested.");
+	});
+
+	it("delete falls back to its own message when the API sends none", async () => {
+		mockTasksAPI.deleteOne.mockResolvedValueOnce({});
+		const program = makeProgram();
+		await program.parseAsync(["node", "x", "tasks", "delete", "--task-id", "t-7"]);
+		expect(mockSucceed).toHaveBeenCalledWith("Task deleted");
+	});
+
 	it("watch exits on completed", async () => {
 		mockTasksAPI.waitForTask.mockResolvedValueOnce("completed");
 		const program = makeProgram();
 		await expect(program.parseAsync(["node", "x", "tasks", "watch", "--task-id", "t-8"])).rejects.toThrow(/EXIT/);
 		expect(exitCode).toBeDefined();
+	});
+
+	it("watch shows why a stopped task stopped", async () => {
+		mockTasksAPI.waitForTask.mockResolvedValueOnce("Stopped");
+		mockTasksAPI.getOne.mockResolvedValueOnce({
+			TaskID: "t-10",
+			StatusTransitions: [
+				{ Status: "Stopped", Timestamp: 1, Message: "ErrMaxDurationExceeded: Your program ran longer than..." },
+			],
+		});
+		const program = makeProgram();
+		await expect(program.parseAsync(["node", "x", "tasks", "watch", "--task-id", "t-10"])).rejects.toThrow(/EXIT/);
+		expect(mockSucceed).toHaveBeenCalledWith("Task finished: Stopped (ErrMaxDurationExceeded)");
+		expect(exitCode).toBe(1);
 	});
 
 	it("watch exits 1 on cancelled", async () => {

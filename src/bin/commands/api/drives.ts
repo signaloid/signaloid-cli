@@ -202,7 +202,7 @@ export default function drives(program: Command) {
 				};
 
 				const res = await client.drives.create(payload as any);
-				spinner.succeed("Drive created");
+				spinner.succeed(res.message || "Drive created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create drive");
@@ -238,7 +238,7 @@ export default function drives(program: Command) {
 				if (dataSources) patch.DataSources = dataSources;
 
 				const res = await client.drives.update(id, patch as any);
-				spinner.succeed("Drive updated");
+				spinner.succeed(res.message || "Drive updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update drive");
@@ -256,7 +256,7 @@ export default function drives(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.drives.delete(id);
-				spinner.succeed("Drive deleted");
+				spinner.succeed(res.message || "Drive deleted");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete drive");

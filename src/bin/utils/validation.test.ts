@@ -10,7 +10,10 @@ import {
 	assert as assertGuard,
 	parseNumericOption,
 	validateFilePath,
+	parseFiniteNumber,
+	parseMaxDuration,
 } from "./validation";
+import { InvalidArgumentError } from "commander";
 
 describe("validation utils", () => {
 	describe("validateEmail", () => {
@@ -140,5 +143,36 @@ describe("validation utils", () => {
 			expect(validateFilePath("")).toBe(false);
 			expect(validateFilePath("\0bad")).toBe(false);
 		});
+	});
+
+	describe("parseFiniteNumber", () => {
+		it.each([
+			["-2.5", -2.5],
+			["0", 0],
+			["10", 10],
+		])("parses %p as %p", (input, expected) => {
+			expect(parseFiniteNumber(input)).toBe(expected);
+		});
+
+		it.each(["abc", "5abc", "", "Infinity"])("rejects %p with InvalidArgumentError", (input) => {
+			expect(() => parseFiniteNumber(input)).toThrow(InvalidArgumentError);
+		});
+	});
+
+	describe("parseMaxDuration", () => {
+		it.each([
+			["1", 1],
+			["600", 600],
+			["28800", 28800],
+		])("parses %p as %p", (input, expected) => {
+			expect(parseMaxDuration(input)).toBe(expected);
+		});
+
+		it.each(["0", "-5", "28801", "1.5", "10s", "", " ", " 600 ", "6e2", "0x10"])(
+			"rejects %p with InvalidArgumentError",
+			(input) => {
+				expect(() => parseMaxDuration(input)).toThrow(InvalidArgumentError);
+			},
+		);
 	});
 });

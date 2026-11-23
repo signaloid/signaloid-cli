@@ -156,3 +156,33 @@ export function parsePositiveInt(value: string): number {
 	}
 	return n;
 }
+
+/** The longest a Task or Build may run, in seconds (8 hours). The API refuses a longer limit. */
+const MAX_DURATION_SECONDS = 28800;
+
+/** Help text for the --max-duration option of the task and build create commands. */
+export const MAX_DURATION_HELP = `Stop the run after this number of seconds, from 1 to ${MAX_DURATION_SECONDS} (8 hours). Setup and output processing do not count. Leave it out for the 8-hour platform maximum`;
+
+/**
+ * Commander parser for --max-duration. Accepts a whole number of seconds from 1 to 28800, the
+ * range the API accepts for `MaxDurationSeconds`. Only plain digits count, so a typo such as
+ * "6e2" or "0x10" is refused rather than read as another number.
+ */
+export function parseMaxDuration(value: string): number {
+	const n = Number(value);
+	if (!/^\d+$/.test(value) || n < 1 || n > MAX_DURATION_SECONDS) {
+		throw new InvalidArgumentError(`must be a whole number of seconds from 1 to ${MAX_DURATION_SECONDS}`);
+	}
+	return n;
+}
+
+/**
+ * Commander parser for options that take any finite number, such as plot axis limits.
+ */
+export function parseFiniteNumber(value: string): number {
+	const n = Number(value);
+	if (value.trim() === "" || !Number.isFinite(n)) {
+		throw new InvalidArgumentError("must be a number");
+	}
+	return n;
+}

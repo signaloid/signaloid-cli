@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { loadConfig, saveConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import inquirer from "inquirer";
+import { API_KEYS_URL } from "../../utils/error-handler";
 
 // Mock dependencies
 jest.mock("../../utils/config");
@@ -10,6 +11,7 @@ jest.mock("../../utils/sdk");
 jest.mock("ora", () => {
 	return jest.fn(() => ({
 		start: jest.fn().mockReturnThis(),
+		stop: jest.fn().mockReturnThis(),
 		succeed: jest.fn().mockReturnThis(),
 		fail: jest.fn().mockReturnThis(),
 	}));
@@ -62,8 +64,13 @@ describe("auth commands", () => {
 				}),
 			},
 			auth: {
-				login: jest.fn().mockResolvedValue({}),
+				login: jest.fn().mockResolvedValue({ isSignedIn: true, nextStep: { signInStep: "DONE" } }),
+				confirmNewPassword: jest.fn().mockResolvedValue({ isSignedIn: true, nextStep: { signInStep: "DONE" } }),
+				getAuthorizationHeader: jest.fn().mockResolvedValue("Bearer jwt-token"),
 				logout: jest.fn().mockResolvedValue({}),
+			},
+			keys: {
+				list: jest.fn().mockResolvedValue({ Count: 1 }),
 			},
 		};
 
@@ -161,6 +168,81 @@ describe("auth commands", () => {
 		it("still logs in with --api-key <key>", async () => {
 			await program.parseAsync(["node", "x", "auth", "login", "--api-key", "scce_good"]);
 			expect(saveConfig).toHaveBeenCalledWith({ auth: { mode: "apikey", apiKey: "scce_good" } });
+		});
+	});
+
+	describe("email/password sign-in", () => {
+		const emailLogin = ["node", "x", "auth", "login", "--email", "user@example.com", "--password", "temp-pass"];
+
+		beforeEach(() => {
+			auth(program);
+			(process.stdin as any).isTTY = true;
+		});
+
+		it("saves the session token when sign-in completes", async () => {
+			await program.parseAsync(emailLogin);
+			expect(mockClient.auth.login).toHaveBeenCalledWith("user@example.com", "temp-pass");
+			expect(mockClient.auth.confirmNewPassword).not.toHaveBeenCalled();
+			expect(saveConfig).toHaveBeenCalledWith({ auth: { mode: "jwt", token: "jwt-token" } });
+		});
+
+		it("prompts for a new password when the account has a temporary one", async () => {
+			mockClient.auth.login.mockResolvedValueOnce({
+				isSignedIn: false,
+				nextStep: { signInStep: "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED" },
+			});
+			(inquirer.prompt as unknown as jest.Mock).mockResolvedValueOnce({
+				newPassword: "new-pass",
+				confirmPassword: "new-pass",
+			});
+			await program.parseAsync(emailLogin);
+			expect(mockClient.auth.confirmNewPassword).toHaveBeenCalledWith("new-pass");
+			expect(saveConfig).toHaveBeenCalledWith({ auth: { mode: "jwt", token: "jwt-token" } });
+		});
+
+		it("exits 2 without prompting when a new password is needed and there is no terminal", async () => {
+			(process.stdin as any).isTTY = false;
+			mockClient.auth.login.mockResolvedValueOnce({
+				isSignedIn: false,
+				nextStep: { signInStep: "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED" },
+			});
+			await expect(program.parseAsync(emailLogin)).rejects.toThrow(/Process exited with code/);
+			expect(process.exit).toHaveBeenNthCalledWith(1, 2);
+			expect(inquirer.prompt).not.toHaveBeenCalled();
+			expect(saveConfig).not.toHaveBeenCalled();
+		});
+
+		it.each(["AUTH_INCORRECT_CREDENTIALS", "AUTH_USER_NOT_FOUND"])(
+			"points a Google account to the API keys page when sign-in fails with %s",
+			async (code) => {
+				mockClient.auth.login.mockRejectedValueOnce({ name: "SdkError", code, message: "Sign-in failed" });
+				await expect(program.parseAsync(emailLogin)).rejects.toThrow(/Process exited with code/);
+				const printed = (console.error as jest.Mock).mock.calls.flat().join("\n");
+				expect(printed).toContain("sign in to Signaloid with Google");
+				expect(printed).toContain(API_KEYS_URL);
+			},
+		);
+
+		it("does not mention Google when sign-in fails for another reason", async () => {
+			mockClient.auth.login.mockRejectedValueOnce({
+				name: "SdkError",
+				code: "API_NETWORK_ERROR",
+				message: "Network error",
+			});
+			await expect(program.parseAsync(emailLogin)).rejects.toThrow(/Process exited with code/);
+			const printed = (console.error as jest.Mock).mock.calls.flat().join("\n");
+			expect(printed).not.toContain("Google");
+		});
+
+		it("exits 3 without saving when sign-in needs a step the CLI does not support", async () => {
+			mockClient.auth.login.mockResolvedValueOnce({
+				isSignedIn: false,
+				nextStep: { signInStep: "CONFIRM_SIGN_IN_WITH_TOTP_CODE" },
+			});
+			await expect(program.parseAsync(emailLogin)).rejects.toThrow(/Process exited with code/);
+			expect(process.exit).toHaveBeenNthCalledWith(1, 3);
+			expect(mockClient.auth.getAuthorizationHeader).not.toHaveBeenCalled();
+			expect(saveConfig).not.toHaveBeenCalled();
 		});
 	});
 
