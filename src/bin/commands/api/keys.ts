@@ -136,7 +136,7 @@ export default function keys(program: Command) {
 				};
 
 				const res = await client.keys.create(payload);
-				spinner.succeed("API key created");
+				spinner.succeed(res.message || "API key created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create key");
@@ -253,8 +253,8 @@ export default function keys(program: Command) {
 
 			const spinner = createSpinner("Deleting API key...");
 			try {
-				await client.keys.delete(keyId);
-				spinner.succeed("API key deleted");
+				const res = await client.keys.delete(keyId);
+				spinner.succeed(res.message || "API key deleted");
 			} catch (e: any) {
 				spinner.fail("Failed to delete key");
 				await handleCliError(e);

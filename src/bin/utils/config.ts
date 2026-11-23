@@ -10,7 +10,7 @@ export type CLIConfig = {
 	auth?: { mode: "apikey" | "email" | "jwt"; apiKey?: string; email?: string; token?: string };
 };
 
-const baseDir =
+export const configDir =
 	process.env.SIGNALOID_CONFIG_DIR ||
 	(process.platform === "win32"
 		? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "signaloid-cli")
@@ -18,7 +18,7 @@ const baseDir =
 			? path.join(os.homedir(), "Library", "Application Support", "signaloid-cli")
 			: path.join(os.homedir(), ".config", "signaloid-cli"));
 
-const file = path.join(baseDir, "config.json");
+const file = path.join(configDir, "config.json");
 
 export async function loadConfig(): Promise<CLIConfig> {
 	try {
@@ -30,7 +30,7 @@ export async function loadConfig(): Promise<CLIConfig> {
 	}
 }
 export async function saveConfig(cfg: CLIConfig) {
-	await fs.mkdir(baseDir, { recursive: true, mode: 0o700 });
+	await fs.mkdir(configDir, { recursive: true, mode: 0o700 });
 
 	// Write config file with restricted permissions (0o600 = read/write for owner only)
 	// This is important because the config file contains sensitive data like API keys
@@ -42,7 +42,7 @@ export async function saveConfig(cfg: CLIConfig) {
 	if (process.platform !== "win32") {
 		for (const [target, mode] of [
 			[file, 0o600],
-			[baseDir, 0o700],
+			[configDir, 0o700],
 		] as const) {
 			await fs.chmod(target, mode).catch(() => {});
 		}

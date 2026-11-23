@@ -228,7 +228,7 @@ export default function repos(program: Command) {
 				}
 
 				const res = await client.repositories.connect(payload as any);
-				spinner.succeed("Repository connected");
+				spinner.succeed(res.message || "Repository connected");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create repository");
@@ -308,7 +308,7 @@ export default function repos(program: Command) {
 						remove: removeFields.length > 0 ? removeFields : undefined,
 					} as any,
 				);
-				spinner.succeed("Repository updated");
+				spinner.succeed(res.message || "Repository updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update repository");
@@ -325,8 +325,8 @@ export default function repos(program: Command) {
 			const spinner = createSpinner("Disconnecting repository...");
 			try {
 				const client = makeClient(await loadConfig());
-				await client.repositories.disconnect(repoId);
-				spinner.succeed("Repository disconnected");
+				const res = await client.repositories.disconnect(repoId);
+				spinner.succeed(res.message || "Repository disconnected");
 				printData(JSON.stringify({ RepositoryID: repoId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disconnect repository");

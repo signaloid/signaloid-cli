@@ -5,11 +5,44 @@ import { loadConfig } from "../../utils/config";
 import { webReadableToBuffer, writeBinary } from "../../utils/fsx";
 import { loadJsonIfPath, loadUxPayloadFile } from "../../utils/params";
 import { makeClient } from "../../utils/sdk";
-import { PlotResponse } from "@signaloid/scce-sdk";
+import { PlotOptions, PlotResponse } from "@signaloid/scce-sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printError } from "../../utils/verbosity";
 import { EXIT_CODES } from "../../utils/exit-codes";
+import { parseFiniteNumber } from "../../utils/validation";
+
+/**
+ * Collects the axis label and axis limit flags into the SDK's plot options.
+ * @param opts - Parsed commander options of a plot subcommand
+ * @returns Plot options to pass to the SDK
+ */
+function toPlotOptions(opts: any): PlotOptions {
+	return {
+		xAxisLabel: opts.xAxisLabel,
+		xLimMin: opts.xLimMin,
+		xLimMax: opts.xLimMax,
+		yLimMin: opts.yLimMin,
+		yLimMax: opts.yLimMax,
+	};
+}
+
+/**
+ * Adds the axis label and axis limit flags that both plot subcommands take.
+ * @param command - The plot subcommand
+ * @returns The same command, for chaining
+ */
+function addAxisOptions(command: Command): Command {
+	return command
+		.option(
+			"--x-axis-label <label>",
+			"Label for the x-axis, from 1 to 20 characters. Text between $ signs is drawn as math, and \\$ gives a literal dollar sign",
+		)
+		.option("--x-lim-min <n>", "Lower limit of the x-axis (use with --x-lim-max)", parseFiniteNumber)
+		.option("--x-lim-max <n>", "Upper limit of the x-axis (use with --x-lim-min)", parseFiniteNumber)
+		.option("--y-lim-min <n>", "Lower limit of the y-axis (use with --y-lim-max)", parseFiniteNumber)
+		.option("--y-lim-max <n>", "Upper limit of the y-axis (use with --y-lim-min)", parseFiniteNumber);
+}
 
 /**
  * Registers the 'plot' command and subcommands for generating plots and visualizations.
@@ -34,7 +67,7 @@ export default function plot(program: Command) {
 
 	// signaloid-cli plot ux-string --file payload.json
 	// signaloid-cli plot ux-string --ux-string <ux string>
-	cmd.command("ux-string")
+	addAxisOptions(cmd.command("ux-string"))
 		.description("Plot distributions from Ux strings")
 		.option("--ux-string <ux-string>", "Ux string")
 		.option("--file <json>", "Payload JSON file with Ux strings")
@@ -52,10 +85,10 @@ export default function plot(program: Command) {
 				const client = makeClient(await loadConfig());
 				let res: PlotResponse;
 				if (opts.file) {
-					res = await client.plotting.plot(await loadUxPayloadFile(opts.file));
+					res = await client.plotting.plot(await loadUxPayloadFile(opts.file), toPlotOptions(opts));
 				} else {
 					const raw = opts.uxString;
-					res = await client.plotting.plot(raw);
+					res = await client.plotting.plot(raw, toPlotOptions(opts));
 				}
 
 				if (opts.outFile && !opts.uxString) {
@@ -86,7 +119,7 @@ export default function plot(program: Command) {
 
 	// signaloid-cli plot valueID --task-id <id> --value-id <id>
 	// or: --file payload.json  (expects { "taskID": "...", "valueID": "..." })
-	cmd.command("value-id")
+	addAxisOptions(cmd.command("value-id"))
 		.description("Plot distributions from a Reference Core task using output Value IDs")
 		.option("--task-id <id>", "Task ID")
 		.option("--value-id <id>", "Value ID")
@@ -115,8 +148,8 @@ export default function plot(program: Command) {
 					throw new Error("Both taskID and valueID are required (via flags or JSON file).");
 				}
 
-				// SDK signature: plotValue(taskID, valueID)
-				const res = await client.plotting.plotValue(String(taskID), String(valueID));
+				// SDK signature: plotValue(taskID, valueID, options)
+				const res = await client.plotting.plotValue(String(taskID), String(valueID), toPlotOptions(opts));
 
 				spinner.succeed();
 				const plotId = res.PlotID;

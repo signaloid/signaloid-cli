@@ -22,7 +22,7 @@ jest.mock("../../utils/sdk", () => {
 	const webhooks = {
 		list: jest.fn().mockResolvedValue({ Webhooks: [{ WebhookID: "w1" }], Count: 1 }),
 		getOne: jest.fn().mockResolvedValue({ WebhookID: "w1", Status: "active" }),
-		create: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "active", Secret: "whsec_x" }),
+		create: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "active", Secret: "sec_x" }),
 		update: jest.fn().mockResolvedValue({ WebhookID: "w-new", Status: "disabled" }),
 		delete: jest.fn().mockResolvedValue({ ok: true }),
 		listAll: jest.fn().mockResolvedValue([]),
@@ -105,7 +105,7 @@ describe("webhooks CLI", () => {
 		expect(JSON.parse(logSpy.mock.calls.at(-1)![0])).toEqual({
 			WebhookID: "w-new",
 			Status: "disabled",
-			Secret: "whsec_x",
+			Secret: "sec_x",
 		});
 	});
 
@@ -115,7 +115,7 @@ describe("webhooks CLI", () => {
 		expect(mockWebhooksAPI.create).toHaveBeenCalled();
 		expect(mockWebhooksAPI.getOne).not.toHaveBeenCalled();
 		expect(mockWebhooksAPI.update).not.toHaveBeenCalled();
-		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("whsec_x");
+		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("sec_x");
 	});
 
 	it("create refuses an unknown event before creating anything", async () => {
@@ -138,7 +138,7 @@ describe("webhooks CLI", () => {
 		mockLoadJsonIfPath.mockResolvedValueOnce(undefined);
 		mockWebhooksAPI.update.mockRejectedValueOnce(new Error("503"));
 		await expect(runCreate("--events", "task-status", "--status", "disabled")).rejects.toThrow(/EXIT/);
-		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("whsec_x");
+		expect(JSON.parse(logSpy.mock.calls.at(-1)![0]).Secret).toBe("sec_x");
 	});
 
 	it("refuses a payload file with the old lowercase fields", async () => {

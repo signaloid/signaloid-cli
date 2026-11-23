@@ -4,6 +4,13 @@ import { loadConfig } from "./config";
 import { printDebugError, printError, printTip } from "./verbosity";
 import { EXIT_CODES } from "./exit-codes";
 import { errorCodeOf, httpStatusOf } from "./http-error";
+import { config } from "../../config/env.config";
+
+/**
+ * The API keys page of the web app. Creating a key there needs no working CLI login, and it is
+ * the only way to get a key for an account that signs in with Google, since it has no password.
+ */
+export const API_KEYS_URL = `${config.SIGNALOID_URL}/settings/api`;
 
 /**
  * Wraps an async function with consistent error handling and spinner management.
@@ -113,6 +120,7 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 		code === "AUTH_INVALID_TOKEN" ||
 		code === "AUTH_MISSING_TOKEN" ||
 		code === "AUTH_NOT_LOGGED_IN" ||
+		code === "AUTH_SESSION_FAILED" ||
 		code === "API_UNAUTHORIZED" ||
 		status === 401 ||
 		msg === "Unauthorized";
@@ -140,6 +148,11 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 						"",
 						"  signaloid-cli auth login --email <your-email> --password <your-password>",
 						"",
+						"If you sign in to Signaloid with Google, create an API key at",
+						`${API_KEYS_URL} and log in with it:`,
+						"",
+						"  signaloid-cli auth login --api-key <your-key>",
+						"",
 					].join("\n"),
 				),
 			);
@@ -149,10 +162,9 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 					[
 						"",
 						"Your API key appears to be invalid or expired.",
-						"You can create a new key with:",
+						`Create a new key at ${API_KEYS_URL}, then log in with it:`,
 						"",
-						'  signaloid-cli keys create --name "my-cli-key"',
-						"  signaloid-cli auth login --api-key <created-key>",
+						"  signaloid-cli auth login --api-key <new-key>",
 						"",
 					].join("\n"),
 				),
@@ -167,6 +179,8 @@ export async function handleCliError(e: any, context?: string): Promise<never> {
 						"  signaloid-cli auth login --api-key <your-key>",
 						"  # or",
 						"  signaloid-cli auth login --email <your-email> --password <your-password>",
+						"",
+						`You can create an API key at ${API_KEYS_URL}.`,
 						"",
 					].join("\n"),
 				),

@@ -37,6 +37,7 @@ For information on these features, see the [Signaloid CLI developer documentatio
   - [users](#users)
   - [webhooks](#webhooks)
 - [Global Options](#global-options)
+  - [Update notifications](#update-notifications)
 - [Command Aliases](#command-aliases)
 - [Web App Generator](#web-app-generator)
 
@@ -125,6 +126,8 @@ signaloid-cli auth login [--api-key [key]] [--email [email]] [--password <passwo
 
 If no options are specified, an interactive menu prompts you to choose a login method.
 
+If your account has a temporary password, email/password login prompts you to set a new password before it signs you in. If sign-in needs any other step, the command exits with code 3. Sign in with an API key instead.
+
 ```sh
 # API key login — recommended for scripts and long-lived sessions
 signaloid-cli auth login --api-key scce_...
@@ -203,7 +206,7 @@ signaloid-cli builds get --build-id <id> [--format <table|json>]
 Create a build from a local source file.
 
 ```
-signaloid-cli builds create:source --file <path> --lang <lang> [--args <args>] [--core-id <id>] [--trace-variables <json>] [--data-sources <json>] [--public] [--discover-variables] [--config-mk <path>]
+signaloid-cli builds create:source --file <path> --lang <lang> [--args <args>] [--core-id <id>] [--trace-variables <json>] [--data-sources <json>] [--public] [--discover-variables] [--config-mk <path>] [--max-duration <sec>]
 ```
 
 | Option | Description |
@@ -217,13 +220,14 @@ signaloid-cli builds create:source --file <path> --lang <lang> [--args <args>] [
 | `--public` | Mark the build as publicly accessible (sets `IsPublic=true`) |
 | `--discover-variables` | Request SCCE to discover traceable variables (sets `DiscoverVariables=true` query param). Not supported on `r7i` cores. |
 | `--config-mk <path>` | Path to a `config.mk` file |
+| `--max-duration <sec>` | Stop the build if it runs longer than this number of seconds, from 1 to 28800 (8 hours). The time Signaloid takes to set up the run and process its outputs does not count. Leave it out for the platform maximum of 8 hours. A build that runs longer ends `Stopped`. |
 
 #### `builds create:repo`
 
 Create a build from a connected repository.
 
 ```
-signaloid-cli builds create:repo --repo-id <id> [--args <args>] [--core-id <id>] [--discover-vars] [--trace-variables <json>] [--data-sources <json>] [--public | --private]
+signaloid-cli builds create:repo --repo-id <id> [--args <args>] [--core-id <id>] [--discover-vars] [--trace-variables <json>] [--data-sources <json>] [--max-duration <sec>] [--public | --private]
 ```
 
 | Option | Description |
@@ -236,6 +240,7 @@ signaloid-cli builds create:repo --repo-id <id> [--args <args>] [--core-id <id>]
 | `--data-sources <json>` | JSON array of `DataSource` objects, for example `'[{"Location":"data","Object":"DataSource","ResourceID":"drv_...","ResourceType":"Drive"}]'` |
 | `--public` | Mark the resulting build as public |
 | `--private` | Mark the resulting build as private (default) |
+| `--max-duration <sec>` | Stop the build if it runs longer than this number of seconds, from 1 to 28800 (8 hours). The time Signaloid takes to set up the run and process its outputs does not count. Leave it out for the platform maximum of 8 hours. A build that runs longer ends `Stopped`. |
 
 #### `builds status`
 
@@ -268,7 +273,7 @@ signaloid-cli builds output-urls --build-id <id>
 
 #### `builds watch`
 
-Wait for a build to finish. Exits `0` on success, `1` on failure or timeout. If the live (WebSocket) connection fails, it polls the build status until the timeout.
+Wait for a build to finish. Exits `0` on success, `1` on failure or timeout. If the live (WebSocket) connection fails, it polls the build status until the timeout. For a build that ends `Stopped`, it also shows why, for example `Stopped (ErrMaxDurationExceeded)` for a build that ran longer than its `--max-duration`, or `Stopped (ErrTimeout)` for one that ran longer than 8 hours.
 
 ```
 signaloid-cli builds watch --build-id <id> [--timeout <sec>]
@@ -956,7 +961,7 @@ Plot distributions from Ux strings or task output values.
 Specify either `--ux-string` or `--file`.
 
 ```
-signaloid-cli plot ux-string {--ux-string <ux> | --file <json>} [--out <dir>] [--out-file <path>]
+signaloid-cli plot ux-string {--ux-string <ux> | --file <json>} [--out <dir>] [--out-file <path>] [--x-axis-label <label>] [--x-lim-min <n> --x-lim-max <n>] [--y-lim-min <n> --y-lim-max <n>]
 ```
 
 | Option | Description |
@@ -965,6 +970,9 @@ signaloid-cli plot ux-string {--ux-string <ux> | --file <json>} [--out <dir>] [-
 | `--file <json>` | JSON file whose `Payload` field is a Ux string or a list of numeric samples, for example `{"Payload": "1.0Ux..."}` |
 | `--out <dir>` | Directory to save the output image |
 | `--out-file <path>` | Full output file path (only valid with `--ux-string`) |
+| `--x-axis-label <label>` | Label under the x-axis, from 1 to 20 characters. Text between `$` signs is drawn as math, as in `'$\mu$ (s)'`, and `\$` gives a literal dollar sign. |
+| `--x-lim-min <n>`, `--x-lim-max <n>` | Range of the x-axis. Set both, with the minimum below the maximum. |
+| `--y-lim-min <n>`, `--y-lim-max <n>` | Range of the y-axis. Set both, with the minimum below the maximum. |
 
 #### `plot value-id`
 
@@ -973,7 +981,7 @@ A value ID identifies a traced output expression from a Reference core task. Ret
 Specify either `--file`, or `--task-id` with `--value-id`.
 
 ```
-signaloid-cli plot value-id {--task-id <id> --value-id <id> | --file <json>} [--out <dir>] [--out-file <path>]
+signaloid-cli plot value-id {--task-id <id> --value-id <id> | --file <json>} [--out <dir>] [--out-file <path>] [--x-axis-label <label>] [--x-lim-min <n> --x-lim-max <n>] [--y-lim-min <n> --y-lim-max <n>]
 ```
 
 | Option | Description |
@@ -983,6 +991,9 @@ signaloid-cli plot value-id {--task-id <id> --value-id <id> | --file <json>} [--
 | `--file <json>` | JSON file with `{ "taskID": "...", "valueID": "..." }` |
 | `--out <dir>` | Directory to save the output image |
 | `--out-file <path>` | Full output file path |
+| `--x-axis-label <label>` | Label under the x-axis, from 1 to 20 characters. Text between `$` signs is drawn as math, as in `'$\mu$ (s)'`, and `\$` gives a literal dollar sign. |
+| `--x-lim-min <n>`, `--x-lim-max <n>` | Range of the x-axis. Set both, with the minimum below the maximum. |
+| `--y-lim-min <n>`, `--y-lim-max <n>` | Range of the y-axis. Set both, with the minimum below the maximum. |
 
 [↑ Top](#signaloid-cli)
 
@@ -1130,7 +1141,7 @@ Manage tasks (executions of builds). **Aliases:** `t`, `task`
 Run a new task from the specified build. Use `--public` to create a public task that can be accessed without authentication. Builds for the `C0-microSD`, `C0-microSD-plus` and `C0-SD` classes cannot run as tasks. Download their binary with `builds binary` and run it on the matching Compute Module instead.
 
 ```
-signaloid-cli tasks create --build-id <id> [--args <str>] [--params-file <file>] [--param <k=v>]... [--public]
+signaloid-cli tasks create --build-id <id> [--args <str>] [--params-file <file>] [--param <k=v>]... [--max-duration <sec>] [--public]
 ```
 
 | Option | Description |
@@ -1139,6 +1150,7 @@ signaloid-cli tasks create --build-id <id> [--args <str>] [--params-file <file>]
 | `--args <str>` | Runtime arguments string |
 | `--params-file <file>` | JSON file containing a full `CreateTaskRequest` payload |
 | `--param <k=v>` | Inline key=value parameter (repeatable) |
+| `--max-duration <sec>` | Stop the task if it runs longer than this number of seconds, from 1 to 28800 (8 hours). The time Signaloid takes to set up the run and process its outputs does not count. A task does not take the limit from its build. Takes precedence over `MaxDurationSeconds` in `--params-file`. Leave it out for the platform maximum of 8 hours. A task that runs longer ends `Stopped`. |
 | `--public` | Create a public task (accessible without authentication) |
 
 #### `tasks list`
@@ -1215,7 +1227,7 @@ signaloid-cli tasks output-urls --task-id <id> [--public]
 
 #### `tasks watch`
 
-Wait for a task to finish. Exits `0` on success, `1` on failure or timeout.
+Wait for a task to finish. Exits `0` on success, `1` on failure or timeout. For a task that ends `Stopped`, it also shows why, for example `Stopped (ErrMaxDurationExceeded)` for a task that ran longer than its `--max-duration`, or `Stopped (ErrTimeout)` for one that ran longer than 8 hours.
 
 ```
 signaloid-cli tasks watch --task-id <id> [--timeout <sec>]
@@ -1422,6 +1434,18 @@ Available on the top-level `signaloid-cli` command.
 | `-d, --debug` | | Output extra debugging information |
 | `-V, --version` | | Print the version number and exit |
 | `-h, --help` | | Display help |
+
+### Update notifications
+
+Once a day, the CLI checks npm in the background for a newer release. If one is available, the next command prints a notice on stderr after its output. The check never delays or fails a command.
+
+The notice does not appear with JSON output (`--json` or `--format json`), with `--verbosity` below `2`, when stderr is not a terminal, or when `CI` is set. To turn the check off, set either environment variable:
+
+```bash
+export SIGNALOID_CLI_NO_UPDATE_CHECK=1
+# or the variable many Node.js CLIs use
+export NO_UPDATE_NOTIFIER=1
+```
 
 [↑ Top](#signaloid-cli)
 

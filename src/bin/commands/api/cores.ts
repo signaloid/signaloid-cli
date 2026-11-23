@@ -317,7 +317,7 @@ export default function cores(program: Command) {
 				} as CoreRequest;
 
 				const res = await client.cores.create(payload);
-				spinner.succeed("Core created");
+				spinner.succeed(res.message || "Core created");
 				warnMemoryIgnored(opts.memory, res.MemorySize);
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -445,7 +445,7 @@ export default function cores(program: Command) {
 				if (Number.isFinite(opts.precision)) patch.Precision = opts.precision;
 
 				const res = await client.cores.update(id, patch);
-				spinner.succeed("Core updated");
+				spinner.succeed(res.message || "Core updated");
 				warnMemoryIgnored(opts.memory);
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
@@ -464,7 +464,7 @@ export default function cores(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.cores.delete(id);
-				spinner.succeed("Core deleted");
+				spinner.succeed(res.message || "Core deleted");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete core");

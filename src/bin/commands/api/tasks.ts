@@ -21,7 +21,8 @@ import { makeClient } from "../../utils/sdk";
 import { handleCliError } from "../../utils/error-handler";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printData } from "../../utils/verbosity";
-import { parsePositiveInt } from "../../utils/validation";
+import { MAX_DURATION_HELP, parseMaxDuration, parsePositiveInt } from "../../utils/validation";
+import { describeFinalStatus } from "../../utils/stop-reason";
 import { EXIT_CODES } from "../../utils/exit-codes";
 
 const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
@@ -49,7 +50,7 @@ const TERMINAL_TASK_STATES = new Set(["completed", "cancelled", "stopped"]);
  *
  * @example
  * ```
- * signaloid-cli tasks create --build-id build-123 --args "arg1 arg2"
+ * signaloid-cli tasks create --build-id build-123 --args "arg1 arg2" --max-duration 600
  * signaloid-cli tasks list --status completed
  * signaloid-cli tasks watch --task-id task-456
  * signaloid-cli tasks output --task-id task-456 --stream stdout --out ./output.txt
@@ -60,13 +61,14 @@ export default function tasks(program: Command) {
 	useGhStyleHelp(cmd);
 	addLearnMore(cmd, "https://docs.signaloid.io/docs/api/signaloid-cli/intro");
 
-	// signaloid-cli tasks create --build-id <id> [--args "..."] [--params-file file.json] [--param Arguments="..."] [--public]
+	// signaloid-cli tasks create --build-id <id> [--args "..."] [--params-file file.json] [--param Arguments="..."] [--max-duration <sec>] [--public]
 	cmd.command("create")
 		.description("Create a task from a build")
 		.requiredOption("--build-id <id>", "Build ID")
 		.option("--args <str>", "Default input arguments for the task")
 		.option("--params-file <file>", "JSON file with CreateTaskRequest")
 		.option("--param <k=v...>", "Inline param (repeatable)", (v, prev: string[]) => (prev ? [...prev, v] : [v]), [])
+		.option("--max-duration <sec>", MAX_DURATION_HELP, parseMaxDuration)
 		.option("--public", "Create a public task (accessible without authentication)")
 		.action(async (opts) => {
 			const spinner = createSpinner("Creating task...");
@@ -88,13 +90,14 @@ export default function tasks(program: Command) {
 				} else if (inline.Arguments) {
 					payload.Arguments = String(inline.Arguments);
 				}
+				if (opts.maxDuration !== undefined) payload.MaxDurationSeconds = opts.maxDuration;
 
 				const buildId = String(opts.buildId);
 				const res = opts.public
 					? await client.tasks.createPublicTask(buildId, payload)
 					: await client.tasks.createTask(buildId, payload);
 
-				spinner.succeed(opts.public ? "Public task created" : "Task created");
+				spinner.succeed(res.message || (opts.public ? "Public task created" : "Task created"));
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Task creation failed");
@@ -275,8 +278,8 @@ export default function tasks(program: Command) {
 			const spinner = createSpinner("Canceling task...");
 			try {
 				const client = makeClient(await loadConfig());
-				await client.tasks.cancel(taskId);
-				spinner.succeed("Cancel requested");
+				const res = await client.tasks.cancel(taskId);
+				spinner.succeed(res.message || "Cancel requested");
 				printData(JSON.stringify({ TaskID: taskId, cancelled: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to cancel task");
@@ -293,8 +296,8 @@ export default function tasks(program: Command) {
 			const spinner = createSpinner("Deleting task...");
 			try {
 				const client = makeClient(await loadConfig());
-				await client.tasks.deleteOne(taskId);
-				spinner.succeed("Task deleted");
+				const res = await client.tasks.deleteOne(taskId);
+				spinner.succeed(res.message || "Task deleted");
 				printData(JSON.stringify({ TaskID: taskId, deleted: true }, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete task");
@@ -316,7 +319,9 @@ export default function tasks(program: Command) {
 					timeoutSec: opts.timeout,
 				});
 				const final = String(status || "").toLowerCase();
-				spinner.succeed(`Task finished: ${status}`);
+				spinner.succeed(
+					`Task finished: ${await describeFinalStatus(status, () => client.tasks.getOne(taskId))}`,
+				);
 				process.exit(TERMINAL_TASK_STATES.has(final) && final === "completed" ? 0 : 1);
 			} catch (e: any) {
 				spinner.fail("Failed to watch task");

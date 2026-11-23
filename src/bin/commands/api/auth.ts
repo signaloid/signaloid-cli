@@ -5,11 +5,18 @@ import chalk from "chalk";
 import { loadConfig, saveConfig } from "../../utils/config";
 import { makeClient } from "../../utils/sdk";
 import { validateEmail, validateNonEmptyString } from "../../utils/validation";
-import { errorMessageOf, handleCliError } from "../../utils/error-handler";
+import { API_KEYS_URL, errorMessageOf, handleCliError } from "../../utils/error-handler";
+import { errorCodeOf } from "../../utils/http-error";
 import { displayResource, OutputFormat } from "../../utils/output";
 import { useGhStyleHelp, addLearnMore } from "../../utils/help-formatter";
 import { printDebugError, printError, printInfo, printTip, printData } from "../../utils/verbosity";
 import { EXIT_CODES } from "../../utils/exit-codes";
+
+/**
+ * SDK codes for a failed email/password sign-in that an account created with Google also gets,
+ * as it has no password.
+ */
+const GOOGLE_ACCOUNT_SIGN_IN_ERRORS = new Set(["AUTH_INCORRECT_CREDENTIALS", "AUTH_USER_NOT_FOUND"]);
 
 /**
  * Prompts need a terminal. Without one, inquirer cannot ask and the login would end as
@@ -230,7 +237,54 @@ export default function auth(program: Command) {
 				const client = makeClient(loginCfg);
 
 				spinner.start("Authenticating...");
-				await client.auth.login(email, password);
+				let signIn = await client.auth.login(email, password);
+
+				if (!signIn.isSignedIn && signIn.nextStep.signInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED") {
+					spinner.stop();
+					requireInteractive();
+					printInfo("You must set a new password before you can sign in.");
+					const { newPassword } = await inquirer.prompt<{ newPassword: string; confirmPassword: string }>([
+						{
+							type: "password",
+							name: "newPassword",
+							message: "New password:",
+							mask: "*",
+							validate: (input: string) =>
+								validateNonEmptyString(input) ? true : "Password cannot be empty",
+						},
+						{
+							type: "password",
+							name: "confirmPassword",
+							message: "Confirm new password:",
+							mask: "*",
+							validate: (input: string, answers?: { newPassword?: string }) =>
+								input === answers?.newPassword ? true : "Passwords do not match",
+						},
+					]);
+					spinner.start("Setting new password...");
+					signIn = await client.auth.confirmNewPassword(newPassword);
+				}
+
+				if (!signIn.isSignedIn) {
+					spinner.fail("Authentication failed");
+					printError(
+						chalk.red(
+							`Sign-in needs another step that the CLI does not support yet (${signIn.nextStep.signInStep}).`,
+						),
+					);
+					printTip(
+						chalk.yellow(
+							[
+								"",
+								`Create an API key at ${API_KEYS_URL}, then sign in with it instead:`,
+								"",
+								"  signaloid-cli auth login --api-key <your-key>",
+								"",
+							].join("\n"),
+						),
+					);
+					process.exit(EXIT_CODES.AUTH);
+				}
 
 				const authHeader = await client.auth.getAuthorizationHeader();
 
@@ -287,6 +341,20 @@ export default function auth(program: Command) {
 				}
 				spinner.fail("Authentication failed");
 				printError(chalk.red(errorMessageOf(e)));
+				if (GOOGLE_ACCOUNT_SIGN_IN_ERRORS.has(errorCodeOf(e) ?? "")) {
+					printTip(
+						chalk.yellow(
+							[
+								"",
+								"If you sign in to Signaloid with Google, your account has no password.",
+								`Create an API key at ${API_KEYS_URL}, then log in with it:`,
+								"",
+								"  signaloid-cli auth login --api-key <your-key>",
+								"",
+							].join("\n"),
+						),
+					);
+				}
 				printDebugError(e);
 				process.exit(EXIT_CODES.ERROR);
 			}

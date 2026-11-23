@@ -70,7 +70,7 @@ export default function github(program: Command) {
 				const res = await client.github.createOrUpdateIntegration(userID, {
 					GithubAuthCode: opts.token,
 				});
-				spinner.succeed("GitHub connected/updated");
+				spinner.succeed(res.message || "GitHub connected/updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to connect/update GitHub");
@@ -87,7 +87,7 @@ export default function github(program: Command) {
 				const userID = await resolveUserId(opts.userId);
 				const client = makeClient(await loadConfig());
 				const res = await client.github.deleteIntegration(userID);
-				spinner.succeed("GitHub disconnected");
+				spinner.succeed(res.message || "GitHub disconnected");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to disconnect GitHub");

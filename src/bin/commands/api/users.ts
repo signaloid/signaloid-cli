@@ -119,7 +119,7 @@ export default function users(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.users.delete(String(opts.userId));
-				spinner.succeed("User deleted");
+				spinner.succeed(res.message || "User deleted");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete user");
@@ -204,7 +204,7 @@ export default function users(program: Command) {
 					removeFields.length > 0
 						? await client.users.update(userID, patch as any, { remove: removeFields })
 						: await client.users.update(userID, patch as any);
-				spinner.succeed("User updated");
+				spinner.succeed(res.message || "User updated");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {
@@ -269,7 +269,7 @@ export default function users(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.users.logoutAllSessions(String(opts.userId));
-				spinner.succeed("Logout-all requested");
+				spinner.succeed(res.message || "Logout-all requested");
 
 				const format = (opts.format || "json") as OutputFormat;
 				if (format === "json") {

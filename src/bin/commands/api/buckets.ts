@@ -126,7 +126,7 @@ export default function buckets(program: Command) {
 				if (typeof opts.write !== "undefined") payload.Write = !!opts.write;
 
 				const res = await client.buckets.create(payload);
-				spinner.succeed("Bucket created");
+				spinner.succeed(res.message || "Bucket created");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to create bucket");
@@ -156,7 +156,7 @@ export default function buckets(program: Command) {
 				if (typeof opts.write !== "undefined") patch.Write = !!opts.write;
 
 				const res = await client.buckets.update(bucketId, patch as any);
-				spinner.succeed("Bucket updated");
+				spinner.succeed(res.message || "Bucket updated");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to update bucket");
@@ -173,7 +173,7 @@ export default function buckets(program: Command) {
 			try {
 				const client = makeClient(await loadConfig());
 				const res = await client.buckets.delete(bucketId);
-				spinner.succeed("Bucket deleted");
+				spinner.succeed(res.message || "Bucket deleted");
 				printData(JSON.stringify(res, null, 2));
 			} catch (e: any) {
 				spinner.fail("Failed to delete bucket");
